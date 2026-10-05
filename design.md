@@ -758,8 +758,8 @@ Service worker 需要 HTTPS（`localhost` 除外），所以「Mac 跑 dev serve
 
 | Phase | 內容 | 驗收 | 環境 |
 |---|---|---|---|
-| **1** | 專案骨架、PWA manifest、service worker、**部署到靜態主機**、standalone 偵測與安裝引導頁 | 在 iPhone 上完成「加到主畫面」並看到引導頁正確切換 | 真機 |
-| **2** | `StoragePort` + `IndexedDbAdapter`、schema v1、sparse unique index 測試 | 真機驗證 Blob 寫入/讀回、`persist()` 回傳值 | 真機 + Vitest |
+| ~~**1**~~ ✅ | 專案骨架、PWA manifest、service worker、**部署到靜態主機**、standalone 偵測與安裝引導頁 | 在 iPhone 上完成「加到主畫面」並看到引導頁正確切換 | 真機 |
+| ~~**2**~~ ✅ | `StoragePort` + `IndexedDbAdapter`、schema v1、sparse unique index 測試 | 真機驗證 Blob 寫入/讀回、`persist()` 回傳值 | 真機 + Vitest |
 | **3** | `parseQuickInput`（含 §4.3 純數字保護） | §4.2 回測表全過，20 筆 ≥ 95% | Vitest |
 | **4** | `RuleClassifier` + 規則 CRUD + §6.2 修正學習 | 單元測試涵蓋 §6.1 五條分支與 §6.2 四種情境 | Vitest |
 | **5** | `buildInvoiceKey` + dedupe/merge | 同 key 重複寫入後筆數為 1，欄位依 §7.3 合併 | Vitest |
@@ -769,6 +769,15 @@ Service worker 需要 HTTPS（`localhost` 除外），所以「Mac 跑 dev serve
 | **9** | QR 辨識（含 §5.2 library 實測選型） | 20 張真實發票，號碼/日期/金額 100% | 真機 |
 
 Phase 3–5 是純邏輯，不受平台影響，可全速在電腦上開發。
+
+### 真機驗收紀錄
+
+| Phase | 日期 | 結果 |
+|---|---|---|
+| 1 | 2026-10-05 | 通過。安裝閘門正確擋住 Safari 分頁；主畫面 App 判定為 standalone（`navigator.standalone` 偵測在 iOS 上有效）；service worker 可用 |
+| 2 | 2026-10-05 | 通過。schema v1 開啟成功、12 個內建類別就位、`navigator.storage.persist()` **回傳 true**、Blob 往返位元組一致且 MIME 保留 |
+
+> `persist()` 在 iOS 上取得授權，代表 IndexedDB 不會因閒置被清除。這降低了資料遺失風險，但**不改變 §14 把備份排在 Phase 6 的決定**——持久化防不了使用者刪除 App、換機、或 iOS 在儲存空間不足時的回收。
 
 **Phase 6 排在 UI 之前**是刻意的：Phase 7 開始會每天記真帳，在那之前資料必須有逃生出口。Phase 9 排最後是因為它依賴還沒到手的樣本，而且 v1 沒有它也能記帳。
 
