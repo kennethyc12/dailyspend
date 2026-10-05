@@ -1,0 +1,92 @@
+:root {
+  --c-bg: #faf9f7;
+  --c-surface: #ffffff;
+  --c-border: #e4e0d9;
+  --c-text: #1d1b19;
+  --c-text-dim: #6b655d;
+  --c-accent: #1f6f5c;
+  --c-accent-dim: #e3efea;
+  --c-warn: #a8532a;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+
+  --radius: 12px;
+  --font: -apple-system, BlinkMacSystemFont, "Noto Sans TC", "PingFang TC", sans-serif;
+
+  /* iOS 瀏海與底部 home indicator 的安全距離，viewport-fit=cover 後必須自己補。 */
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --c-bg: #16181a;
+    --c-surface: #1f2224;
+    --c-border: #32363a;
+    --c-text: #eceae6;
+    --c-text-dim: #9b958c;
+    --c-accent: #5fbfa4;
+    --c-accent-dim: #22352f;
+    --c-warn: #d98a5f;
+  }
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body {
+  height: 100%;
+  overscroll-behavior-y: none;
+}
+
+body {
+  background: var(--c-bg);
+  color: var(--c-text);
+  font-family: var(--font);
+  font-size: 16px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  /* standalone 下長按選取文字會觸發系統選單，記帳流程不需要。 */
+  -webkit-touch-callout: none;
+}
+
+#app {
+  min-height: 100%;
+  padding-top: var(--safe-top);
+  padding-bottom: var(--safe-bottom);
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  border: none;
+  background: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.btn-primary {
+  display: block;
+  width: 100%;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius);
+  background: var(--c-accent);
+  color: #fff;
+  font-weight: 600;
+  text-align: center;
+}
+
+.btn-text {
+  color: var(--c-text-dim);
+  font-size: 14px;
+  text-decoration: underline;
+}
