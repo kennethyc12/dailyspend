@@ -24,6 +24,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - run: npm test
       - run: npm run build
         env:
           # repo 名若改動，base 會跟著改，不需手動同步 vite.config.ts
