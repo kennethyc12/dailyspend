@@ -11,6 +11,7 @@ export type PendingReason =
   | 'duplicate_conflict'
   | 'ambiguous_item_tokens'
   | 'multi_item_correction'
+  | 'missing_merchant'
 
 export interface RecordItem {
   name: string
