@@ -1,6 +1,6 @@
 # DailySpend 設計文件 v0.2
 
-> 狀態：**Phase 1–4 已實作並驗收**（見 §14）。本文件隨實作同步更新，標註「Phase N 補定」的段落是實作時才定案的規格缺口。
+> 狀態：**Phase 1–5 已實作並驗收**（見 §14）。本文件隨實作同步更新，標註「Phase N 補定」的段落是實作時才定案的規格缺口。
 > 技術選型已定：Vue 3 PWA + IndexedDB，**目標平台 iPhone（iOS Safari，standalone 模式）**。
 > 待補輸入：發票 QR 原始文字樣本、載具明細樣本（缺樣本前不撰寫解析欄位邏輯）。
 >
@@ -524,7 +524,15 @@ invoiceKey = invoicePeriod && invoiceNumber
 >
 > **這是 unique index，上線後改 key 必須做資料遷移，所以現在定案。** 若樣本顯示 QR 內另有更可靠的唯一識別（例如含年期的完整欄位），以樣本為準並回來改本節——但那也要在 Phase 2 之前。
 
-邊界：`date` 缺失（純手輸 + 無 QR）時 `invoiceNumber` 通常也缺，`invoiceKey = null`，不參與去重。若有號碼無日期 → `invoiceKey = null` 且記 `pending`，讓使用者補日期。
+邊界：`date` 缺失（純手輸 + 無 QR）時 `invoiceNumber` 通常也缺，`invoiceKey = null`，不參與去重。若有號碼無日期 → `invoiceKey = null` 且記 `pending(missing_invoice_date)`，讓使用者補日期。
+
+#### 號碼格式不做嚴格驗證（Phase 5 補定）
+
+標準格式是 2 個英文字母 + 8 位數字。`isStandardInvoiceNumber()` 只供 UI 提示，**不用於擋下寫入**：
+
+QR 樣本還沒到手，現在就把非標準格式的號碼判定為無效，等於拿假設去阻斷去重——萬一實際格式不同，受害的是「同一張發票被存成兩筆」這種難以察覺的資料汙染。寧可收下再提示。
+
+號碼寫入前只做正規化：去空白與破折號、轉大寫。
 
 ### 7.2 寫入判斷
 
@@ -549,6 +557,37 @@ else → merge(existing, incoming)
 | `updatedAt` | 一律更新為 `Date.now()` |
 
 載具匯入（日後）走同一條 merge 路徑，`sourceType: 'carrier'`，所以「匯入去重筆數為 0」由同一段程式保證。
+
+#### 第一列的矛盾（Phase 5 補定）
+
+「取高優先來源」與「兩邊都有且不同 → 保留既有」互相牴觸。定案：
+
+```
+值相同              → 不算衝突
+一邊為 null         → 補上，不算衝突
+值不同、優先層不同  → 取高優先來源，並記 conflicts + pending(duplicate_conflict)
+值不同、同一優先層  → 保留既有，並記 conflicts + pending(duplicate_conflict)
+```
+
+重點是**衝突一律標記**。載具資料比手輸可信，該覆蓋就覆蓋，但「兩邊數字對不上」這件事不能被無聲吞掉——它可能代表抓錯發票。
+
+#### `user` 優先序只適用於 `categoryId`（Phase 5 補定）
+
+來源優先序寫成 `user > carrier > qr > manual`，但我們沒有逐欄位的編輯紀錄：`categorySource === 'user'` 只證明**類別**被改過，不證明日期或金額被改過。
+
+所以實作上 `user` 只參與 `categoryId` 的判斷，其餘欄位一律用 `sourceType` 比較（`carrier > qr > manual`）。要讓 `user` 適用於所有欄位，得在 schema 上加逐欄位的編輯來源，v1 不做。
+
+#### merge 另外回報三件事（Phase 5 補定）
+
+`mergeRecords()` 除了合併後的紀錄，還回傳：
+
+| 欄位 | 用途 |
+|---|---|
+| `discardedPhotoId` | 兩張照片都有時被丟棄的那張，UI 要提示 |
+| `needsReclassify` | 既有分類非使用者設定且品項變了 → 上層要重跑分類 |
+| `conflicts` | 衝突欄位名清單，UI 標出哪幾格對不上 |
+
+`needsReclassify` 是旗標而非直接重跑，因為分類必須在 transaction 之外執行（§2.2）。
 
 ---
 
@@ -818,7 +857,7 @@ Service worker 需要 HTTPS（`localhost` 除外），所以「Mac 跑 dev serve
 | ~~**2**~~ ✅ | `StoragePort` + `IndexedDbAdapter`、schema v1、sparse unique index 測試 | 真機驗證 Blob 寫入/讀回、`persist()` 回傳值 | 真機 + Vitest |
 | ~~**3**~~ ✅ | `parseQuickInput`（含 §4.3 純數字保護） | §4.2 回測表全過，20 筆 ≥ 95% | Vitest |
 | ~~**4**~~ ✅ | `RuleClassifier` + 規則 CRUD + §6.2 修正學習 | 單元測試涵蓋 §6.1 五條分支與 §6.2 四種情境 | Vitest |
-| **5** | `buildInvoiceKey` + dedupe/merge | 同 key 重複寫入後筆數為 1，欄位依 §7.3 合併 | Vitest |
+| ~~**5**~~ ✅ | `buildInvoiceKey` + dedupe/merge | 同 key 重複寫入後筆數為 1，欄位依 §7.3 合併 | Vitest |
 | **6** | **備份 / CSV 匯出 / 還原（Web Share）** | 真機完成一次「匯出 → 存到檔案 App → 還原」完整來回 | 真機 |
 | **7** | 最小 UI：快速輸入、列表、待確認佇列 | 開始每日真實記帳 | 真機 |
 | **8** | 分析（§8 四條規則 + 冷啟動 + 建議排序） | 每條結論都附得出 evidence | 真機 |
@@ -834,6 +873,7 @@ Phase 3–5 是純邏輯，不受平台影響，可全速在電腦上開發。
 | 2 | 2026-10-05 | 通過。schema v1 開啟成功、12 個內建類別就位、`navigator.storage.persist()` **回傳 true**、Blob 往返位元組一致且 MIME 保留 |
 | 3 | 2026-10-08 | 通過（Vitest，不需真機）。§4.2 回測表 6 條全過，20 筆語料庫 20/20 = 100%，總計 52 個剖析測試 |
 | 4 | 2026-10-08 | 通過（Vitest，不需真機）。§6.1 五條分支、§6.2 四種情境、規則 CRUD 與優先序各有測試，共 42 個，專案總計 109 個 |
+| 5 | 2026-10-09 | 通過（Vitest，不需真機）。同發票重複寫入後筆數為 1、載具匯入去重後重複筆數 0、跨年度同號碼視為兩筆、合併時不留孤兒照片。共 35 個，專案總計 144 個 |
 
 > `persist()` 在 iOS 上取得授權，代表 IndexedDB 不會因閒置被清除。這降低了資料遺失風險，但**不改變 §14 把備份排在 Phase 6 的決定**——持久化防不了使用者刪除 App、換機、或 iOS 在儲存空間不足時的回收。
 

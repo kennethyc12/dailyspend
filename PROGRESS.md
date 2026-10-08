@@ -7,7 +7,7 @@
 
 ## 現況一句話
 
-Phase 1–4 完成，站台已上線，109 個測試全過。下一步是 Phase 5 `buildInvoiceKey` + 去重 merge，純邏輯、不碰平台。
+Phase 1–5 完成，站台已上線，144 個測試全過。下一步是 **Phase 6 備份 / CSV 匯出 / 還原**——排在 UI 之前是刻意的，Phase 7 開始每天記真帳，在那之前資料必須有逃生出口。
 
 ---
 
@@ -70,6 +70,18 @@ iPhone 上要從**主畫面圖示**開啟，不要用 Safari 分頁（App 會擋
 「全部命中但類別分歧」歸入多數決、ambiguous 判定要看 priority、
 `ClassifyOutput` 加 `pendingReasons`。
 
+### Phase 5 — 去重鍵與合併 ✅
+
+- `buildInvoiceKey`：民國年 + 期別起始月 + 號碼，例如 `11509-AB12345678`。
+  **唯一的產生點**，因為它是 unique index 的 key
+- `mergeRecords`：§7.3 欄位級合併，另回報 `discardedPhotoId` /
+  `needsReclassify` / `conflicts`
+- `saveRecord`：§7.2 寫入判斷，`ConstraintError` 作為最後防線會重讀再合併
+- **35 個測試全過**，含「載具匯入去重後重複筆數 0」與「跨年度同號碼視為兩筆」
+
+補定三處規格缺口：號碼格式不做嚴格驗證（樣本未到）、§7.3 第一列的矛盾、
+`user` 優先序只適用於 `categoryId`。
+
 ### Commit 紀錄
 
 ```
@@ -81,17 +93,21 @@ b8bcad7  Phase 1: PWA 骨架、安裝閘門與 GitHub Pages 部署
 
 ---
 
-## 下一步：Phase 5 — `buildInvoiceKey` + 去重
+## 下一步：Phase 6 — 備份 / CSV 匯出 / 還原
 
-**範圍**：發票年期推導、`invoiceKey` 產生、同 key 的欄位級 merge。
+**範圍**：CSV 匯出、完整備份（zip）、還原、7 天提醒、Web Share 匯出。
 
-**規格**：design.md §7（§7.1 去重鍵、§7.2 寫入判斷、§7.3 merge 規則）
+**規格**：design.md §11（§11.1 Web Share 優先、§11.2 備份提醒）
 
-**驗收**：同 key 重複寫入後筆數為 1，欄位依 §7.3 的來源優先序合併
+**驗收**：**真機**完成一次「匯出 → 存到 iPhone 檔案 App → 還原」完整來回
 
-**環境**：Vitest，純邏輯，不需要真機也不需要樣本
+**環境**：真機。`navigator.share` 必須在使用者手勢的同步呼叫鏈內觸發，
+這點只有 iPhone 上測得出來。
 
-要接續時跟 Claude 說「開始 Phase 5」即可。
+**為什麼排在 UI 之前**：Phase 7 開始會每天記真帳，在那之前資料必須有逃生出口。
+`persist()` 雖然已取得授權，但防不了刪 App、換機、或 iOS 回收儲存空間。
+
+要接續時跟 Claude 說「開始 Phase 6」即可。
 
 ---
 
@@ -99,7 +115,6 @@ b8bcad7  Phase 1: PWA 骨架、安裝閘門與 GitHub Pages 部署
 
 | Phase | 內容 | 卡關？ |
 |---|---|---|
-| 5 | `buildInvoiceKey` + 去重 merge | 否 |
 | 6 | **備份 / CSV 匯出 / 還原** | 否 |
 | 7 | 最小 UI，開始每日真實記帳 | 否 |
 | 8 | 分析（四條規則 + 冷啟動 + 建議排序） | 否 |

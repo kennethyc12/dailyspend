@@ -12,6 +12,7 @@ export type PendingReason =
   | 'ambiguous_item_tokens'
   | 'multi_item_correction'
   | 'missing_merchant'
+  | 'missing_invoice_date'
 
 export interface RecordItem {
   name: string
