@@ -7,7 +7,7 @@
 
 ## 現況一句話
 
-Phase 1–3 完成，站台已上線，67 個測試全過。下一步是 Phase 4 `RuleClassifier` + 規則 CRUD + 修正學習，純邏輯、不碰平台。
+Phase 1–4 完成，站台已上線，109 個測試全過。下一步是 Phase 5 `buildInvoiceKey` + 去重 merge，純邏輯、不碰平台。
 
 ---
 
@@ -56,6 +56,20 @@ iPhone 上要從**主畫面圖示**開啟，不要用 Safari 分頁（App 會擋
 斜線允許單位數（`10/3`），破折號要求補零兩位（`09-28`），所以 `7-11` 是店家。
 已納入回測語料庫。
 
+### Phase 4 — 規則分類與修正學習 ✅
+
+- `RuleClassifier` 實作 `ClassifierPort`，§6.1 五條分支齊備
+- 規則優先序：itemKeyword/userCorrection 400 → merchant/builtin 100，
+  同層再比 pattern 長度、createdAt
+- `planCorrection` 實作 §6.2 四種情境，**多品項改整筆時不自動學品項規則**
+- 規則 CRUD：builtin 只能停用、userCorrection 可刪、`recordHits` 累計命中
+- 62 條內建規則，**刻意不含超商與量販店**（§3.3）
+- **42 個測試全過**
+
+補定了四處 v0.2 的規格缺口，都寫回 design.md：`Rule.isActive`、
+「全部命中但類別分歧」歸入多數決、ambiguous 判定要看 priority、
+`ClassifyOutput` 加 `pendingReasons`。
+
 ### Commit 紀錄
 
 ```
@@ -67,17 +81,17 @@ b8bcad7  Phase 1: PWA 骨架、安裝閘門與 GitHub Pages 部署
 
 ---
 
-## 下一步：Phase 4 — `RuleClassifier`
+## 下一步：Phase 5 — `buildInvoiceKey` + 去重
 
-**範圍**：規則比對分類、規則 CRUD、使用者修正即成規則。
+**範圍**：發票年期推導、`invoiceKey` 產生、同 key 的欄位級 merge。
 
-**規格**：design.md §6（§6.1 分類流程五條分支、§6.2 修正學習四種情境、§6.3 規則管理）
+**規格**：design.md §7（§7.1 去重鍵、§7.2 寫入判斷、§7.3 merge 規則）
 
-**驗收**：單元測試涵蓋 §6.1 五條分支與 §6.2 四種情境
+**驗收**：同 key 重複寫入後筆數為 1，欄位依 §7.3 的來源優先序合併
 
 **環境**：Vitest，純邏輯，不需要真機也不需要樣本
 
-要接續時跟 Claude 說「開始 Phase 4」即可。
+要接續時跟 Claude 說「開始 Phase 5」即可。
 
 ---
 
@@ -85,7 +99,6 @@ b8bcad7  Phase 1: PWA 骨架、安裝閘門與 GitHub Pages 部署
 
 | Phase | 內容 | 卡關？ |
 |---|---|---|
-| 4 | `RuleClassifier` + 規則 CRUD + 修正學習 | 否 |
 | 5 | `buildInvoiceKey` + 去重 merge | 否 |
 | 6 | **備份 / CSV 匯出 / 還原** | 否 |
 | 7 | 最小 UI，開始每日真實記帳 | 否 |

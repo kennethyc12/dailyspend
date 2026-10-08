@@ -1,10 +1,10 @@
 # DailySpend 設計文件 v0.2
 
-> 狀態：設計審查第二輪已套用，尚未動工。
+> 狀態：**Phase 1–4 已實作並驗收**（見 §14）。本文件隨實作同步更新，標註「Phase N 補定」的段落是實作時才定案的規格缺口。
 > 技術選型已定：Vue 3 PWA + IndexedDB，**目標平台 iPhone（iOS Safari，standalone 模式）**。
 > 待補輸入：發票 QR 原始文字樣本、載具明細樣本（缺樣本前不撰寫解析欄位邏輯）。
 >
-> v0.2 修訂摘要見 §15。
+> v0.2 修訂摘要見 §15。進度與開發指令見 [PROGRESS.md](./PROGRESS.md)。
 
 ---
 
@@ -82,13 +82,20 @@ interface Tx {                       // 自定義，非 IDBTransaction
 interface StoragePort {
   put<T>(store: StoreName, value: T): Promise<StoreKey>
   get<T>(store: StoreName, id: StoreKey): Promise<T | undefined>
+  getByIndex<T>(store: StoreName, index: string, key: StoreKey): Promise<T | undefined>
   query<T>(store: StoreName, index: string, range: KeyRange, opts?: QueryOptions): Promise<T[]>
+  getAll<T>(store: StoreName): Promise<T[]>
+  count(store: StoreName): Promise<number>
   delete(store: StoreName, id: StoreKey): Promise<void>
   transaction<T>(stores: StoreName[], fn: (tx: Tx) => Promise<T>): Promise<T>
-  estimateUsage(): Promise<{ usage: number; quota: number }>
+  estimateUsage(): Promise<{ usage: number; quota: number | null }>
   requestPersist(): Promise<boolean>
+  isPersisted(): Promise<boolean | null>
+  close(): void
 }
 ```
+
+`ConstraintError`（unique index 衝突）由 adapter 轉成自定義的 `StorageConflictError`，避免 `DOMException` 洩漏到 service 層。
 
 `IndexedDbAdapter` 內部把 `KeyRange` 轉成 `IDBKeyRange`（`gte`+`lte` → `bound`、僅 `gte` → `lowerBound`、以此類推）。未來的 `SqliteAdapter` 把同一個 `KeyRange` 轉成 `WHERE` 子句，service 層完全不動。
 
@@ -143,6 +150,7 @@ interface ClassifyOutput {
   classifyConfidence: number         // 0–1
   source: 'rule' | 'ai'
   matchedRuleIds: string[]
+  pendingReasons: PendingReason[]    // Phase 4 補上，見 §6.1
 }
 
 interface ClassifierPort {
@@ -253,6 +261,7 @@ query('records', 'by_date', { gte: '2026-10-01', lte: '2026-10-31' })
 | `categoryId` | string | |
 | `priority` | number | 數字大者優先 |
 | `origin` | `'builtin' \| 'userCorrection'` | 規則清單畫面可刪除 userCorrection |
+| `isActive` | boolean | §6.3 要求 builtin 可停用，v0.2 的欄位表漏了，Phase 4 補上 |
 | `hitCount` / `lastHitAt` | number | 顯示「這條規則用過幾次」 |
 | `createdAt` / `updatedAt` | number | |
 
@@ -437,6 +446,32 @@ v0.1 寫的是「`BarcodeDetector` 原生 API，不支援時 fallback」。**v0.
 ```
 
 **步驟 1 先於步驟 2，且步驟 3 的順序本身就是「品項優先於店家」。** 見 §3.4 的註記。
+
+#### 五條分支之間的縫隙（Phase 4 補定）
+
+**「items 全部命中但類別分歧」** 不屬於上面任何一條。例如 `[咖啡, 拿鐵, 衛生紙]` 三項全命中，但分屬飲料與日用品。
+
+定案：**視同「部分命中」，走多數決 0.7。** 分歧本身就是信心不足的訊號，不該拿到「全部命中」的 0.95。
+
+#### ambiguous 的判定要看 priority（Phase 4 補定）
+
+「merchant 命中多類別」若直接用「所有命中規則的類別數 > 1」判斷，會出現這個死結：
+
+```
+內建規則：      蝦皮 → 日用品   (priority 100)
+使用者修正：    蝦皮 → 娛樂     (priority 200)
+→ 兩個類別 → 判為 ambiguous → 永遠進待確認
+```
+
+使用者修正過的店家反而永遠分不出來，§6.2 的「修正即成規則」形同失效。
+
+定案：**只取命中規則的最高優先層（priority 與 pattern 長度都相同者），該層內仍有多個類別才算 ambiguous。** 上例中使用者修正獨占最高層，結果是「娛樂」，不是 ambiguous。
+
+同樣邏輯套用在 itemKeyword 上。
+
+#### `ClassifyOutput` 要帶 `pendingReasons`（Phase 4 補定）
+
+§2.3 的介面定義沒有這個欄位，但步驟 3–4 會產生 `ambiguous_merchant` / `no_category_match` / `low_confidence`，上層要靠它決定 `status`。已加入介面。
 
 ### 6.2 修正即成規則（v0.2 修正：多品項不自動學習）
 
@@ -782,7 +817,7 @@ Service worker 需要 HTTPS（`localhost` 除外），所以「Mac 跑 dev serve
 | ~~**1**~~ ✅ | 專案骨架、PWA manifest、service worker、**部署到靜態主機**、standalone 偵測與安裝引導頁 | 在 iPhone 上完成「加到主畫面」並看到引導頁正確切換 | 真機 |
 | ~~**2**~~ ✅ | `StoragePort` + `IndexedDbAdapter`、schema v1、sparse unique index 測試 | 真機驗證 Blob 寫入/讀回、`persist()` 回傳值 | 真機 + Vitest |
 | ~~**3**~~ ✅ | `parseQuickInput`（含 §4.3 純數字保護） | §4.2 回測表全過，20 筆 ≥ 95% | Vitest |
-| **4** | `RuleClassifier` + 規則 CRUD + §6.2 修正學習 | 單元測試涵蓋 §6.1 五條分支與 §6.2 四種情境 | Vitest |
+| ~~**4**~~ ✅ | `RuleClassifier` + 規則 CRUD + §6.2 修正學習 | 單元測試涵蓋 §6.1 五條分支與 §6.2 四種情境 | Vitest |
 | **5** | `buildInvoiceKey` + dedupe/merge | 同 key 重複寫入後筆數為 1，欄位依 §7.3 合併 | Vitest |
 | **6** | **備份 / CSV 匯出 / 還原（Web Share）** | 真機完成一次「匯出 → 存到檔案 App → 還原」完整來回 | 真機 |
 | **7** | 最小 UI：快速輸入、列表、待確認佇列 | 開始每日真實記帳 | 真機 |
@@ -798,6 +833,7 @@ Phase 3–5 是純邏輯，不受平台影響，可全速在電腦上開發。
 | 1 | 2026-10-05 | 通過。安裝閘門正確擋住 Safari 分頁；主畫面 App 判定為 standalone（`navigator.standalone` 偵測在 iOS 上有效）；service worker 可用 |
 | 2 | 2026-10-05 | 通過。schema v1 開啟成功、12 個內建類別就位、`navigator.storage.persist()` **回傳 true**、Blob 往返位元組一致且 MIME 保留 |
 | 3 | 2026-10-08 | 通過（Vitest，不需真機）。§4.2 回測表 6 條全過，20 筆語料庫 20/20 = 100%，總計 52 個剖析測試 |
+| 4 | 2026-10-08 | 通過（Vitest，不需真機）。§6.1 五條分支、§6.2 四種情境、規則 CRUD 與優先序各有測試，共 42 個，專案總計 109 個 |
 
 > `persist()` 在 iOS 上取得授權，代表 IndexedDB 不會因閒置被清除。這降低了資料遺失風險，但**不改變 §14 把備份排在 Phase 6 的決定**——持久化防不了使用者刪除 App、換機、或 iOS 在儲存空間不足時的回收。
 

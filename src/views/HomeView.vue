@@ -9,7 +9,7 @@ import {
 } from '@/composables/useStorageStatus'
 
 const { isStandalone, platform, devBypass } = useDisplayMode()
-const { state, error, categoryCount, persistGranted, usage } = useStorageStatus()
+const { state, error, categoryCount, ruleCount, persistGranted, usage } = useStorageStatus()
 
 const swSupported = 'serviceWorker' in navigator
 const blobResult = ref<BlobRoundTrip | null>(null)
@@ -68,6 +68,9 @@ function mb(bytes: number) {
 
         <dt>內建類別</dt>
         <dd>{{ categoryCount === null ? '—' : `${categoryCount} 項` }}</dd>
+
+        <dt>啟用中規則</dt>
+        <dd>{{ ruleCount === null ? '—' : `${ruleCount} 條` }}</dd>
 
         <dt>儲存已持久化</dt>
         <dd :class="persistGranted ? 'ok' : 'warn'">

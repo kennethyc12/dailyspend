@@ -69,6 +69,8 @@ export interface Rule {
   categoryId: string
   priority: number
   origin: RuleOrigin
+  /** builtin 規則不可刪除，只能停用（§6.3）。 */
+  isActive: boolean
   hitCount: number
   lastHitAt: number | null
   createdAt: number

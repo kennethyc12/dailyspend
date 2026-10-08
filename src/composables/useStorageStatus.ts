@@ -1,5 +1,6 @@
 import { ref } from 'vue'
 import { getStorage, seed } from '@/storage'
+import { loadActiveRules, seedBuiltinRules } from '@/services/ruleService'
 import type { Category, Settings } from '@/models/types'
 
 export type InitState = 'idle' | 'running' | 'ready' | 'failed'
@@ -7,6 +8,7 @@ export type InitState = 'idle' | 'running' | 'ready' | 'failed'
 const state = ref<InitState>('idle')
 const error = ref<string | null>(null)
 const categoryCount = ref<number | null>(null)
+const ruleCount = ref<number | null>(null)
 const settings = ref<Settings | null>(null)
 const persistGranted = ref<boolean | null>(null)
 const usage = ref<{ usage: number; quota: number | null } | null>(null)
@@ -19,6 +21,7 @@ export async function initStorage() {
   const storage = getStorage()
   try {
     const loaded = await seed(storage)
+    await seedBuiltinRules(storage)
 
     // persist() 必須在有資料之後才問，否則 Safari 幾乎必定拒絕。
     const granted = (await storage.isPersisted()) || (await storage.requestPersist())
@@ -32,6 +35,7 @@ export async function initStorage() {
 
     settings.value = loaded
     categoryCount.value = (await storage.getAll<Category>('categories')).length
+    ruleCount.value = (await loadActiveRules(storage)).length
     usage.value = await storage.estimateUsage()
     state.value = 'ready'
   } catch (e) {
@@ -83,5 +87,5 @@ export async function runBlobRoundTrip(): Promise<BlobRoundTrip> {
 }
 
 export function useStorageStatus() {
-  return { state, error, categoryCount, settings, persistGranted, usage }
+  return { state, error, categoryCount, ruleCount, settings, persistGranted, usage }
 }
