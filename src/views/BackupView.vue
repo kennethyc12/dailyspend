@@ -138,8 +138,8 @@ async function confirmRestore() {
 </script>
 
 <template>
-  <main class="backup">
-    <RouterLink to="/" class="back">← 返回</RouterLink>
+  <main class="page">
+    <RouterLink to="/settings" class="back">← 設定</RouterLink>
     <h1>備份與匯出</h1>
     <p class="hint">上次備份：{{ lastBackupText }}</p>
 
@@ -204,12 +204,6 @@ async function confirmRestore() {
 </template>
 
 <style scoped>
-.backup {
-  max-width: 480px;
-  margin: 0 auto;
-  padding: var(--space-5) var(--space-4) var(--space-6);
-}
-
 .back {
   display: inline-block;
   margin-bottom: var(--space-4);
