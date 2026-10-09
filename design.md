@@ -5,7 +5,7 @@
 > 技術選型已定：Vue 3 PWA + IndexedDB，**目標平台 iPhone（iOS Safari，standalone 模式）**。
 > 待補輸入：發票 QR 原始文字樣本、載具明細樣本（缺樣本前不撰寫解析欄位邏輯）。
 >
-> v0.2 修訂摘要見 §15。進度與開發指令見 [PROGRESS.md](./PROGRESS.md)，功能總覽見 [FEATURES.md](./FEATURES.md)。
+> v0.2 修訂摘要見 §15。專案簡介見 [README.md](./README.md)，進度見 [PROGRESS.md](./PROGRESS.md)，功能總覽見 [FEATURES.md](./FEATURES.md)。
 
 ---
 

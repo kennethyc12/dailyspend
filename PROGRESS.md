@@ -1,7 +1,8 @@
 # DailySpend 進度交接
 
 > 最後更新：2026-10-09
-> 三份文件的分工：
+> 四份文件的分工：
+> - [README.md](./README.md) — 這專案是什麼、怎麼跑起來
 > - **這份** — 開發進度（按 Phase）、驗收結果、踩過的坑
 > - [FEATURES.md](./FEATURES.md) — 做了哪些功能（按功能）、未完成項目
 > - [design.md](./design.md) — 設計決策與理由
