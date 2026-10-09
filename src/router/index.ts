@@ -7,6 +7,7 @@ export const router = createRouter({
   routes: [
     { path: '/', name: 'entry', component: QuickInputView },
     { path: '/records', name: 'records', component: () => import('@/views/RecordsView.vue') },
+    { path: '/records/:id', name: 'record-edit', component: () => import('@/views/RecordEditView.vue') },
     { path: '/pending', name: 'pending', component: () => import('@/views/PendingView.vue') },
     { path: '/analysis', name: 'analysis', component: () => import('@/views/AnalysisView.vue') },
     { path: '/settings', name: 'settings', component: () => import('@/views/SettingsView.vue') },

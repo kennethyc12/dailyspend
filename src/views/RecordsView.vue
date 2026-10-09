@@ -51,6 +51,7 @@ const total = computed(() => filtered.value.reduce((s, r) => s + r.amount, 0))
       <h2>{{ g.date }} · ${{ g.total }}</h2>
       <ul class="list">
         <li v-for="r in g.items" :key="r.id">
+          <RouterLink :to="`/records/${r.id}`" class="entry">
           <div class="row">
             <span class="merchant">{{ r.merchant || '（無店家）' }}</span>
             <span class="amount">${{ r.amount }}</span>
@@ -62,6 +63,7 @@ const total = computed(() => filtered.value.reduce((s, r) => s + r.amount, 0))
               <template v-if="r.status === 'pending'"> · 待確認</template>
             </span>
           </div>
+          </RouterLink>
         </li>
       </ul>
     </section>
@@ -86,6 +88,12 @@ const total = computed(() => filtered.value.reduce((s, r) => s + r.amount, 0))
 .list li {
   padding: var(--space-3) 0;
   border-bottom: 1px solid var(--c-border);
+}
+
+.entry {
+  display: block;
+  color: inherit;
+  text-decoration: none;
 }
 
 .list li:last-child {

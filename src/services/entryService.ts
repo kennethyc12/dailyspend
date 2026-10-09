@@ -4,7 +4,7 @@ import { parseQuickInput, type BlockingError, type QuickInputParse } from '@/par
 import { classifyWithRules } from '@/classify/ruleClassifier'
 import { planCorrection, type CorrectionPlan, type CorrectionScope } from '@/classify/correction'
 import { applyCorrection, loadActiveRules, recordHits } from './ruleService'
-import { saveRecord, type SaveOutcome } from './recordService'
+import { prepareRecord, saveRecord, type SaveOutcome } from './recordService'
 import type { Settings } from '@/models/types'
 
 /** 歷史店家 + 內建 merchant 規則，用來標記 merchantMatched。 */
@@ -17,6 +17,35 @@ export async function merchantDictionary(storage: StoragePort): Promise<string[]
   for (const r of records) if (r.merchant) names.add(r.merchant)
   for (const r of rules) if (r.type === 'merchant') names.add(r.pattern)
   return [...names]
+}
+
+export class ValidationError extends Error {
+  constructor(
+    message: string,
+    readonly field: string,
+  ) {
+    super(message)
+    this.name = 'ValidationError'
+  }
+}
+
+interface Classified {
+  categoryId: string | null
+  itemCategoryIds: (string | null)[]
+  classifyConfidence: number
+  matchedRuleIds: string[]
+  pendingReasons: PendingReason[]
+}
+
+async function classify(
+  storage: StoragePort,
+  input: { merchant: string | null; items: { name: string }[] },
+): Promise<Classified> {
+  const [rules, settings] = await Promise.all([
+    loadActiveRules(storage),
+    storage.get<Settings>('settings', 'settings'),
+  ])
+  return classifyWithRules(input, rules, settings?.confidence.pendingBelow ?? 0.6)
 }
 
 export type EntryResult =
@@ -33,20 +62,15 @@ export async function createFromText(
   text: string,
   now = Date.now(),
 ): Promise<EntryResult> {
-  const [dict, rules, settings] = await Promise.all([
+  const [dict, settings] = await Promise.all([
     merchantDictionary(storage),
-    loadActiveRules(storage),
     storage.get<Settings>('settings', 'settings'),
   ])
 
   const parse = parseQuickInput(text, { merchantDict: dict })
   if (parse.blockingError) return { ok: false, blocked: parse.blockingError, parse }
 
-  const classified = classifyWithRules(
-    { merchant: parse.merchant, items: parse.items },
-    rules,
-    settings?.confidence.pendingBelow ?? 0.6,
-  )
+  const classified = await classify(storage, { merchant: parse.merchant, items: parse.items })
 
   const items: RecordItem[] = parse.items.map((item, i) => ({
     name: item.name,
@@ -167,6 +191,100 @@ export async function confirmRecord(
     status: 'confirmed',
     updatedAt: now,
   }
+  await storage.put('records', next)
+  return next
+}
+
+export function getRecord(storage: StoragePort, id: string): Promise<SpendRecord | undefined> {
+  return storage.get<SpendRecord>('records', id)
+}
+
+export interface RecordPatch {
+  date?: string
+  merchant?: string
+  amount?: number
+  /** 品項名稱清單。同名的品項會保留既有的 categoryId，新的才重跑分類。 */
+  itemNames?: string[]
+  note?: string
+}
+
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/
+
+/**
+ * 編輯既有紀錄。分類來源是 `user` 時不會被重跑的規則蓋掉——
+ * 使用者改過的分類比規則可信（§7.3 同樣的原則）。
+ */
+export async function updateRecordFields(
+  storage: StoragePort,
+  record: SpendRecord,
+  patch: RecordPatch,
+  now = Date.now(),
+): Promise<SpendRecord> {
+  const date = patch.date ?? record.date
+  if (!ISO_DATE.test(date)) throw new ValidationError('日期格式需為 YYYY-MM-DD', 'date')
+
+  const amount = patch.amount ?? record.amount
+  if (!Number.isInteger(amount)) throw new ValidationError('金額必須是整數（元）', 'amount')
+  if (amount < 0) throw new ValidationError('金額不能是負數', 'amount')
+
+  const merchant = (patch.merchant ?? record.merchant).trim()
+
+  const previous = new Map(record.items.map((i) => [i.name, i]))
+  const items: RecordItem[] =
+    patch.itemNames === undefined
+      ? record.items
+      : patch.itemNames
+          .map((n) => n.trim())
+          .filter(Boolean)
+          .map(
+            (name) =>
+              previous.get(name) ?? {
+                name,
+                qty: 1,
+                unitPrice: null,
+                amount: null,
+                categoryId: null,
+              },
+          )
+
+  const structureChanged =
+    merchant !== record.merchant ||
+    items.length !== record.items.length ||
+    items.some((it, i) => it.name !== record.items[i]?.name)
+
+  let next: SpendRecord = {
+    ...record,
+    date,
+    merchant,
+    amount,
+    items,
+    note: patch.note ?? record.note,
+    updatedAt: now,
+  }
+
+  // 店家或品項變了就重跑分類，但使用者指定過的類別不動。
+  if (structureChanged && record.categorySource !== 'user') {
+    const out = await classify(storage, { merchant: merchant || null, items })
+    next = {
+      ...next,
+      categoryId: out.categoryId,
+      classifyConfidence: out.classifyConfidence,
+      items: items.map((it, i) => ({ ...it, categoryId: out.itemCategoryIds[i] ?? null })),
+      pendingReasons: [
+        ...new Set<PendingReason>([
+          ...next.pendingReasons.filter((r) => !CATEGORY_REASONS.includes(r)),
+          ...out.pendingReasons,
+        ]),
+      ],
+    }
+    await recordHits(storage, out.matchedRuleIds, now)
+  }
+
+  // invoiceKey 由 prepareRecord 重算——它是 unique index 的 key，
+  // 改了日期就必須跟著改，而且只能有一個產生點（§7.1）。
+  next = prepareRecord(next)
+  next.status = next.pendingReasons.length > 0 ? 'pending' : 'confirmed'
+
   await storage.put('records', next)
   return next
 }

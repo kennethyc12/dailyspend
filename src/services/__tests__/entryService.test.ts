@@ -8,7 +8,10 @@ import {
   correctCategory,
   createFromText,
   deleteRecord,
+  getRecord,
   merchantDictionary,
+  updateRecordFields,
+  ValidationError,
 } from '../entryService'
 
 const NOW = 1_760_000_000_000
@@ -180,5 +183,106 @@ describe('確認與刪除', () => {
     await deleteRecord(storage, r)
     expect(await storage.count('records')).toBe(0)
     expect(await storage.count('photos')).toBe(0)
+  })
+})
+
+describe('編輯既有紀錄', () => {
+  it('改金額與店家後存回', async () => {
+    await createFromText(storage, '全家 咖啡 55', NOW)
+    const next = await updateRecordFields(
+      storage,
+      await only(),
+      { merchant: '7-11', amount: 45, note: '改過' },
+      NOW + 1,
+    )
+
+    expect(next.merchant).toBe('7-11')
+    expect(next.amount).toBe(45)
+    expect(next.note).toBe('改過')
+    expect(next.updatedAt).toBe(NOW + 1)
+    expect((await only()).amount).toBe(45)
+  })
+
+  it('金額必須是整數且非負', async () => {
+    await createFromText(storage, '全家 咖啡 55', NOW)
+    const r = await only()
+    await expect(updateRecordFields(storage, r, { amount: 55.5 })).rejects.toBeInstanceOf(
+      ValidationError,
+    )
+    await expect(updateRecordFields(storage, r, { amount: -1 })).rejects.toBeInstanceOf(
+      ValidationError,
+    )
+    expect((await only()).amount).toBe(55)
+  })
+
+  it('日期格式不合法時擋下', async () => {
+    await createFromText(storage, '全家 咖啡 55', NOW)
+    await expect(
+      updateRecordFields(storage, await only(), { date: '2026/10/09' }),
+    ).rejects.toBeInstanceOf(ValidationError)
+  })
+
+  it('改品項會重跑分類', async () => {
+    await createFromText(storage, '全家 咖啡 55', NOW)
+    expect((await only()).categoryId).toBe('drink')
+
+    const next = await updateRecordFields(storage, await only(), { itemNames: ['衛生紙'] }, NOW + 1)
+    expect(next.categoryId).toBe('daily')
+    expect(next.items[0]?.categoryId).toBe('daily')
+  })
+
+  it('使用者指定過的分類不會被重跑的規則蓋掉', async () => {
+    await createFromText(storage, '全家 咖啡 55', NOW)
+    const { record } = await correctCategory(storage, await only(), 'food')
+    expect(record.categorySource).toBe('user')
+
+    const next = await updateRecordFields(storage, record, { itemNames: ['衛生紙'] }, NOW + 1)
+    expect(next.categoryId).toBe('food')
+    expect(next.categorySource).toBe('user')
+  })
+
+  it('同名品項保留既有的 categoryId，新品項才重新分類', async () => {
+    await createFromText(storage, '全聯 咖啡 200', NOW)
+    const next = await updateRecordFields(
+      storage,
+      await only(),
+      { itemNames: ['咖啡', '衛生紙'] },
+      NOW + 1,
+    )
+    expect(next.items.map((i) => i.categoryId)).toEqual(['drink', 'daily'])
+  })
+
+  it('改日期會重算 invoiceKey', async () => {
+    await createFromText(storage, '全家 咖啡 55', NOW)
+    const withInvoice = { ...(await only()), invoiceNumber: 'AB12345678' }
+    const keyed = await updateRecordFields(storage, withInvoice, { date: '2026-10-05' }, NOW + 1)
+    expect(keyed.invoiceKey).toBe('11509-AB12345678')
+
+    // 跨到另一個期別，key 必須跟著變，否則索引內容會對不上。
+    const moved = await updateRecordFields(storage, keyed, { date: '2026-12-05' }, NOW + 2)
+    expect(moved.invoiceKey).toBe('11511-AB12345678')
+  })
+
+  it('改成分不出類別的品項會轉回待確認', async () => {
+    await createFromText(storage, '全家 咖啡 55', NOW)
+    expect((await only()).status).toBe('confirmed')
+
+    const next = await updateRecordFields(storage, await only(), { itemNames: ['不明物'] }, NOW + 1)
+    expect(next.status).toBe('pending')
+    expect(next.pendingReasons).toContain('no_category_match')
+  })
+
+  it('沒傳 itemNames 時品項原樣保留', async () => {
+    await createFromText(storage, '全聯 咖啡 衛生紙 200', NOW)
+    const before = await only()
+    const next = await updateRecordFields(storage, before, { amount: 210 }, NOW + 1)
+    expect(next.items).toEqual(before.items)
+  })
+
+  it('getRecord 取得單筆', async () => {
+    await createFromText(storage, '全家 咖啡 55', NOW)
+    const r = await only()
+    expect((await getRecord(storage, r.id))?.id).toBe(r.id)
+    expect(await getRecord(storage, 'nope')).toBeUndefined()
   })
 })
