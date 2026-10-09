@@ -1036,6 +1036,24 @@ Phase 3–5 是純邏輯，不受平台影響，可全速在電腦上開發。
 
 ---
 
+## 15.1 工程基礎
+
+### 全域錯誤處理
+
+`app.config.errorHandler` + `unhandledrejection` + `window.error`，漏網的錯誤跳紅色橫幅並留在設定頁（最近 20 筆）。
+
+**iPhone 上沒有 console**，錯誤必須留在 App 裡才除得了錯。這是安全網不是替代品——能在 handler 裡處理的仍然要在那裡處理，因為只有那裡知道該顯示什麼訊息。
+
+### ESLint
+
+目的不是統一風格，是抓 bug。核心三條是型別感知規則：`no-floating-promises`、`no-misused-promises`、`await-thenable`。第一條正是 Phase 6「還原按鈕沒反應」的成因，已實測可擋。
+
+刻意關掉的兩條與理由寫在 `eslint.config.js` 的註解裡，摘要：`no-unnecessary-condition` 會跟防禦舊版 Safari 的瀏覽器 API 判斷打架；`no-non-null-assertion` 在 `noUncheckedIndexedAccess` 下是慣用寫法。留著只會產生 32 個警告，訓練人忽略整份輸出。
+
+CI 的順序是 `lint → test → build → deploy`。
+
+---
+
 ## 16. 不在 v1 的清單（避免範圍漂移）
 
 OCR、AI 分類、載具匯入、銀行串接、多人、多幣別、預算上限提醒、圖表以外的報表、跨裝置同步、多品項金額對應剖析、品項模糊比對、店家名稱同義詞合併、刪除規則時回溯套用、即時鏡頭掃描、月對月比較的 `completedMonthsOnly` 模式。

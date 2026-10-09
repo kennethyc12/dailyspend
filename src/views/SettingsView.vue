@@ -7,11 +7,13 @@ import { categoryName, refreshRecords, useRecords } from '@/composables/useRecor
 import { initStorage, useStorageStatus } from '@/composables/useStorageStatus'
 import type { Settings } from '@/models/types'
 import { useDisplayMode } from '@/composables/useDisplayMode'
+import { clearErrors, useErrorLog } from '@/errors/errorLog'
 
 const storage = getStorage()
 const { isStandalone, platform } = useDisplayMode()
 const { state, error, persistGranted, usage, settings } = useStorageStatus()
 const { records } = useRecords()
+const { errors } = useErrorLog()
 
 const rules = shallowRef<Rule[]>([])
 const originFilter = ref<RuleOrigin | 'all'>('userCorrection')
@@ -179,6 +181,9 @@ function mb(bytes: number) {
         <dt>儲存已持久化</dt>
         <dd :class="persistGranted ? 'ok' : 'warn'">{{ persistGranted ? '是' : '否' }}</dd>
 
+        <dt>未處理錯誤</dt>
+        <dd :class="errors.length ? 'warn' : 'ok'">{{ errors.length }} 筆</dd>
+
         <dt>用量</dt>
         <dd>
           {{
@@ -190,6 +195,26 @@ function mb(bytes: number) {
           }}
         </dd>
       </dl>
+    </section>
+
+    <section v-if="errors.length" class="panel">
+      <h2>未處理的錯誤</h2>
+      <p class="hint">
+        這些是沒被畫面攔下的錯誤。iPhone 上看不到 console，所以留在這裡供除錯。
+      </p>
+      <ul class="list">
+        <li v-for="e in errors" :key="e.id">
+          <div class="row">
+            <span>{{ e.message }}</span>
+            <span class="sub">{{ e.source }}</span>
+          </div>
+          <div class="sub">
+            {{ new Date(e.at).toLocaleString('zh-TW') }}
+            <template v-if="e.where"> · {{ e.where }}</template>
+          </div>
+        </li>
+      </ul>
+      <button class="btn-text" @click="clearErrors()">清空</button>
     </section>
 
     <p v-if="errorMsg" class="result warn">{{ errorMsg }}</p>

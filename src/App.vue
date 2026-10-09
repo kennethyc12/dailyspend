@@ -5,6 +5,7 @@ import { useDisplayMode } from '@/composables/useDisplayMode'
 import { initStorage } from '@/composables/useStorageStatus'
 import InstallGuideView from '@/views/InstallGuideView.vue'
 import AppNav from '@/components/AppNav.vue'
+import ErrorBanner from '@/components/ErrorBanner.vue'
 
 const { isStandalone, devBypass } = useDisplayMode()
 const { needRefresh, updateServiceWorker } = useRegisterSW()
@@ -24,6 +25,8 @@ onMounted(() => {
     <RouterView />
     <AppNav />
   </template>
+
+  <ErrorBanner />
 
   <div v-if="needRefresh" class="update-bar" role="status">
     <span>有新版本</span>

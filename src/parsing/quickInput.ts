@@ -34,7 +34,7 @@ const NUMBER_TOKEN = /^(?:NT\$|\$)?(\d{1,3}(?:,\d{3})+|\d+)(\.\d+)?元?$/
 export function normalizeInput(raw: string): string {
   return raw
     .replace(/[！-～]/g, (c) => String.fromCharCode(c.charCodeAt(0) - FULLWIDTH_OFFSET))
-    .replace(/　/g, ' ')
+    .replace(/\u3000/g, ' ') // 全形空白
     .trim()
 }
 

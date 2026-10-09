@@ -7,7 +7,7 @@
 
 ## 現況一句話
 
-**v1 功能已齊**：Phase 1–8 完成並通過真機驗收，另補上編輯/刪除紀錄與拍照管線，站台已上線，240 個測試全過。
+**v1 功能已齊**：Phase 1–8 完成並通過真機驗收，另補上編輯/刪除紀錄與拍照管線，站台已上線，249 個測試全過，lint 乾淨。
 **Phase 9 只剩 QR 解析**，卡在發票樣本——現在可以直接用 App 拍發票累積樣本。
 只剩 Phase 9（QR 辨識），而它卡在發票樣本。現在最該做的是實際用起來，順手蒐集樣本。
 
@@ -163,9 +163,42 @@ Phase 9 拆成兩半，不依賴樣本的先做。
 金額仍是手打的，不該升級 merge 優先序）；EXIF 方向必須套用，否則 iPhone
 拍的照片會躺著存進去。
 
+### 工程基礎：全域錯誤處理 + ESLint ⏳ 待真機驗收
+
+**全域錯誤處理**（`src/errors/`）
+
+- `app.config.errorHandler` + `unhandledrejection` + `window.error` 三個入口
+- 漏網的錯誤會跳紅色橫幅，並留在設定頁（最近 20 筆）
+- iPhone 上看不到 console，所以錯誤必須留在 App 裡才除得了錯
+- 這是**安全網不是替代品**：能在 handler 裡處理的仍然要在那裡處理，
+  因為只有那裡知道該顯示什麼訊息
+- 9 個測試
+
+**ESLint**（`eslint.config.js`）
+
+目的不是統一風格，是抓 bug。核心是三條型別感知規則：
+
+| 規則 | 擋掉什麼 |
+|---|---|
+| `no-floating-promises` | 沒 await 也沒 catch 的 Promise → 「按鈕沒反應」 |
+| `no-misused-promises` | 把 async function 傳給預期同步回呼的地方 |
+| `await-thenable` | await 一個不是 Promise 的值 |
+
+已實測：把 Phase 6 那種 bug 形狀寫進檔案，lint 確實擋下。
+
+刻意關掉 `no-unnecessary-condition` 與 `no-non-null-assertion`——前者會跟
+「防禦舊版 Safari 沒有的瀏覽器 API」打架，後者在 `noUncheckedIndexedAccess`
+下是慣用寫法。32 個警告會讓人忽略整份輸出。
+
+**順手修到一個真的**：`quickInput.ts` 的正規表示式裡是字面的全形空白
+（U+3000），在原始碼中完全看不見。功能正常，但沒人看得出那是什麼。
+
+CI 加上 `npm run lint`，`package.json` 加上 `engines: node >=22`。
+
 ### Commit 紀錄
 
 ```
+a7de182 Phase 9a: 拍照管線（QR 解析待樣本）
 f6a875b 記錄編輯/刪除功能真機驗收通過
 d27d4d2 補上編輯與刪除既有紀錄
 3a0773f 記錄 Phase 8 真機驗收通過；v1 功能已齊
@@ -177,7 +210,6 @@ a556ffb 記錄 Phase 6 真機驗收通過
 a58546e Phase 6: 備份、CSV 匯出與還原
 242f36f Phase 5: invoiceKey 與去重合併
 6e46733 Phase 4: RuleClassifier、規則 CRUD 與修正學習
-2fe4ab0 Phase 3: parseQuickInput 快速輸入切詞
 ```
 
 ---
@@ -260,3 +292,8 @@ push 到 `main` 會自動跑 CI（test → build → deploy）。
 
 7. **UI 的 async handler 一定要 try/catch 並把錯誤顯示出來**。Promise 被吞掉時
    使用者看到的是「按鈕沒反應」，完全無法除錯。Phase 6 就是這樣卡住的。
+   現在有兩層防護：`no-floating-promises` 在 lint 擋下，全域 handler 在
+   執行期接住漏網的。
+
+8. **iPhone 上沒有 console**。要除錯只能靠設定頁的「未處理的錯誤」清單，
+   或接上 Mac Safari 的網頁檢閱器（design.md §13.5）。
