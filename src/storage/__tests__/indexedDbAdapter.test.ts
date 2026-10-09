@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
+import { reactive, ref, shallowRef } from 'vue'
 import { IDBFactory } from 'fake-indexeddb'
 import { IndexedDbAdapter, toIdbRange } from '../indexedDbAdapter'
 import { StorageConflictError } from '../port'
@@ -190,6 +191,21 @@ describe('Blob 寫入與讀回', () => {
     expect(got!.blob.type).toBe('image/jpeg')
     expect(new Uint8Array(await got!.blob.arrayBuffer())).toEqual(bytes)
     expect(got!.thumbBlob.size).toBe(2)
+  })
+})
+
+describe('Vue 響應式物件不可直接寫入', () => {
+  // 真機上還原備份整個沒反應，原因是 restorePreview 放在 ref() 裡，
+  // 裡面每筆 record 都變成 Proxy，IndexedDB 的 structured clone 直接拒絕。
+  // fake-indexeddb 不會重現這個拒絕，所以這裡直接釘住瀏覽器的實際行為。
+  it('ref().value 與 reactive() 無法被 structured clone', () => {
+    const plain = makeRecord()
+    expect(() => structuredClone(ref(plain).value)).toThrow(/could not be cloned/)
+    expect(() => structuredClone(reactive(plain))).toThrow(/could not be cloned/)
+  })
+
+  it('shallowRef().value 可以', () => {
+    expect(() => structuredClone(shallowRef(makeRecord()).value)).not.toThrow()
   })
 })
 

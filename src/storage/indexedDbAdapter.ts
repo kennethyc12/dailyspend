@@ -1,6 +1,7 @@
 import { DB_NAME, DB_VERSION, applySchema } from './schema'
 import {
   StorageConflictError,
+  StorageSerializationError,
   type KeyRange,
   type QueryOptions,
   type StoragePort,
@@ -32,9 +33,17 @@ export function toIdbRange(range: KeyRange): IDBKeyRange | null {
   return null
 }
 
-function asConflict(error: unknown, store: StoreName): unknown {
+function asStorageError(error: unknown, store: StoreName): unknown {
   if (error instanceof DOMException && error.name === 'ConstraintError') {
     return new StorageConflictError(error.message, store)
+  }
+  if (error instanceof Error && error.name === 'DataCloneError') {
+    return new StorageSerializationError(
+      `${store} 的資料無法寫入：值不可被 structured clone。` +
+        '常見原因是把 Vue 的深層響應式物件（ref().value 或 reactive()）直接寫進資料庫，' +
+        '改用 shallowRef 或 toRaw。',
+      store,
+    )
   }
   return error
 }
@@ -46,7 +55,7 @@ class IdbTx implements Tx {
     try {
       return (await wrap(this.tx.objectStore(store).put(value))) as StoreKey
     } catch (e) {
-      throw asConflict(e, store)
+      throw asStorageError(e, store)
     }
   }
 
@@ -88,8 +97,8 @@ export class IndexedDbAdapter implements StoragePort {
 
     const settled = new Promise<void>((resolve, reject) => {
       tx.oncomplete = () => resolve()
-      tx.onabort = () => reject(asConflict(tx.error, stores[0] ?? 'records'))
-      tx.onerror = () => reject(asConflict(tx.error, stores[0] ?? 'records'))
+      tx.onabort = () => reject(asStorageError(tx.error, stores[0] ?? 'records'))
+      tx.onerror = () => reject(asStorageError(tx.error, stores[0] ?? 'records'))
     })
 
     let result: T

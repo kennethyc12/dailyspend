@@ -781,6 +781,23 @@ dailyspend-backup-YYYY-MM-DD.zip
 
 備份檔有問題時在第一步就失敗，既有資料完全沒被碰過。
 
+#### 不可把 Vue 深層響應式物件寫進 IndexedDB（Phase 6 真機抓到）
+
+```
+ref(data).value   → Proxy → structuredClone 丟 DataCloneError
+reactive(data)    → Proxy → 同上
+shallowRef(data).value → 原物件 → OK
+```
+
+IndexedDB 的寫入走 structured clone，而 **Proxy 不可複製**。把待還原的資料放進
+`ref()` 會讓裡面每一筆紀錄都變成 Proxy，`tx.put()` 直接拋 `DataCloneError`。
+
+**規則：任何「之後要寫回資料庫」的資料，一律用 `shallowRef` 或 `toRaw`，不用 `ref`/`reactive`。**
+
+這個 bug 在 Vitest 抓不到——fake-indexeddb 的 structured clone 實作會接受 Proxy，
+只有真瀏覽器會拒絕。因此 adapter 另外把 `DataCloneError` 轉成
+`StorageSerializationError` 並在訊息裡直接點名這個原因。
+
 ### 11.2 備份提醒
 
 - 首次啟動呼叫 `navigator.storage.persist()`，結果存入 `settings.platform.persistGranted`，並顯示在設定頁（讓使用者知道自己的資料處於什麼保護等級）

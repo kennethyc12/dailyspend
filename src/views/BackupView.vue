@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, shallowRef } from 'vue'
 import { getStorage } from '@/storage'
 import { saveFile, type SaveOutcome } from '@/backup/share'
 import { BackupFormatError } from '@/backup/backup'
@@ -18,25 +18,37 @@ const storage = getStorage()
 
 // iOS 要求 navigator.share 在使用者手勢的同步呼叫鏈內，所以檔案必須先備好，
 // 按鈕只負責呼叫 share。若等按下去才 await 組檔，iOS 會擋掉分享。
-const csvFile = ref<File | null>(null)
-const backupFile = ref<File | null>(null)
+const csvFile = shallowRef<File | null>(null)
+const backupFile = shallowRef<File | null>(null)
 const preparing = ref(true)
 
 const message = ref<string | null>(null)
 const errorMsg = ref<string | null>(null)
-const restorePreview = ref<RestorePreview | null>(null)
+
+// 必須是 shallowRef：ref() 會深層代理，裡面每個 record 都變成 Proxy，
+// 而 IndexedDB 走 structured clone，複製 Proxy 會丟 DataCloneError。
+// 任何「之後要寫回資料庫」的資料都不能放進深層響應式的 ref。
+const restorePreview = shallowRef<RestorePreview | null>(null)
 const safetyDelivered = ref(false)
+const restoring = ref(false)
 
 const lastBackupText = computed(() => {
   const at = settings.value?.backup.lastBackupAt
   return at ? new Date(at).toLocaleString('zh-TW') : '從未備份'
 })
 
+function fail(prefix: string, err: unknown) {
+  errorMsg.value =
+    err instanceof BackupFormatError ? err.message : `${prefix}：${(err as Error).message}`
+}
+
 async function prepareFiles() {
   preparing.value = true
   try {
     csvFile.value = await buildCsvFile(storage)
     backupFile.value = await buildBackupFile(storage)
+  } catch (err) {
+    fail('準備檔案失敗', err)
   } finally {
     preparing.value = false
   }
@@ -52,17 +64,25 @@ function describe(outcome: SaveOutcome, what: string) {
 async function exportCsv() {
   if (!csvFile.value) return
   errorMsg.value = null
-  message.value = describe(await saveFile(csvFile.value), 'CSV')
+  try {
+    message.value = describe(await saveFile(csvFile.value), 'CSV')
+  } catch (err) {
+    fail('匯出失敗', err)
+  }
 }
 
 async function exportBackup() {
   if (!backupFile.value) return
   errorMsg.value = null
-  const outcome = await saveFile(backupFile.value)
-  message.value = describe(outcome, '備份')
-  if (outcome !== 'cancelled') {
-    await markBackedUp(storage)
-    await initStorage()
+  try {
+    const outcome = await saveFile(backupFile.value)
+    message.value = describe(outcome, '備份')
+    if (outcome !== 'cancelled') {
+      await markBackedUp(storage)
+      await initStorage()
+    }
+  } catch (err) {
+    fail('備份失敗', err)
   }
 }
 
@@ -86,18 +106,34 @@ async function onPickRestoreFile(e: Event) {
 
 async function downloadSafety() {
   if (!restorePreview.value) return
-  const outcome = await saveFile(restorePreview.value.safetyBackup)
-  if (outcome !== 'cancelled') safetyDelivered.value = true
+  errorMsg.value = null
+  try {
+    const outcome = await saveFile(restorePreview.value.safetyBackup)
+    if (outcome !== 'cancelled') safetyDelivered.value = true
+  } catch (err) {
+    fail('保險備份匯出失敗', err)
+  }
 }
 
 async function confirmRestore() {
-  if (!restorePreview.value) return
-  await commitRestore(storage, restorePreview.value)
-  restorePreview.value = null
-  safetyDelivered.value = false
-  await initStorage()
-  await prepareFiles()
-  message.value = '還原完成'
+  if (!restorePreview.value || restoring.value) return
+  errorMsg.value = null
+  message.value = null
+  restoring.value = true
+  try {
+    const preview = restorePreview.value
+    await commitRestore(storage, preview)
+    restorePreview.value = null
+    safetyDelivered.value = false
+    await initStorage()
+    await prepareFiles()
+    message.value = `還原完成，共 ${preview.parsed.data.records.length} 筆紀錄`
+  } catch (err) {
+    // 還原是整個 App 最危險的操作，絕不能無聲失敗。
+    fail('還原失敗，資料未變更', err)
+  } finally {
+    restoring.value = false
+  }
 }
 </script>
 
@@ -151,8 +187,12 @@ async function confirmRestore() {
         <button class="btn-primary" @click="downloadSafety">
           {{ safetyDelivered ? '✓ 已存下保險備份（可重複存）' : '① 先存下目前資料的保險備份' }}
         </button>
-        <button class="btn-danger mt" :disabled="!safetyDelivered" @click="confirmRestore">
-          ② 確認覆寫並還原
+        <button
+          class="btn-danger mt"
+          :disabled="!safetyDelivered || restoring"
+          @click="confirmRestore"
+        >
+          {{ restoring ? '還原中…' : '② 確認覆寫並還原' }}
         </button>
         <button class="btn-text mt" @click="restorePreview = null">取消</button>
       </div>

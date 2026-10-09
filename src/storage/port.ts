@@ -47,6 +47,20 @@ export interface StoragePort {
   close(): void
 }
 
+/**
+ * 值無法被 structured clone。最常見的原因是把 Vue 的深層響應式物件
+ * （`ref().value` 或 `reactive()`）直接寫進資料庫——Proxy 不可複製。
+ */
+export class StorageSerializationError extends Error {
+  constructor(
+    message: string,
+    readonly store: StoreName,
+  ) {
+    super(message)
+    this.name = 'StorageSerializationError'
+  }
+}
+
 export class StorageConflictError extends Error {
   constructor(
     message: string,
