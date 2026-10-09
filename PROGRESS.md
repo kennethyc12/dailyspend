@@ -1,7 +1,10 @@
 # DailySpend 進度交接
 
 > 最後更新：2026-10-09
-> 設計文件：[design.md](./design.md) v0.2（所有決策與理由都在那裡，這份只記進度）
+> 三份文件的分工：
+> - **這份** — 開發進度（按 Phase）、驗收結果、踩過的坑
+> - [FEATURES.md](./FEATURES.md) — 做了哪些功能（按功能）、未完成項目
+> - [design.md](./design.md) — 設計決策與理由
 
 ---
 
@@ -65,7 +68,7 @@ iPhone 上要從**主畫面圖示**開啟，不要用 Safari 分頁（App 會擋
   同層再比 pattern 長度、createdAt
 - `planCorrection` 實作 §6.2 四種情境，**多品項改整筆時不自動學品項規則**
 - 規則 CRUD：builtin 只能停用、userCorrection 可刪、`recordHits` 累計命中
-- 62 條內建規則，**刻意不含超商與量販店**（§3.3）
+- 64 條內建規則（51 品項 + 13 店家），**刻意不含超商與量販店**（§3.3）
 - **42 個測試全過**
 
 補定了四處 v0.2 的規格缺口，都寫回 design.md：`Rule.isActive`、
