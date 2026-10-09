@@ -1,4 +1,4 @@
-import type { PendingReason, RecordItem, Rule, SpendRecord } from '@/models/types'
+import type { PendingReason, Photo, RecordItem, Rule, SpendRecord } from '@/models/types'
 import type { StoragePort } from '@/storage'
 import { parseQuickInput, type BlockingError, type QuickInputParse } from '@/parsing/quickInput'
 import { classifyWithRules } from '@/classify/ruleClassifier'
@@ -61,6 +61,7 @@ export async function createFromText(
   storage: StoragePort,
   text: string,
   now = Date.now(),
+  photo?: Photo,
 ): Promise<EntryResult> {
   const [dict, settings] = await Promise.all([
     merchantDictionary(storage),
@@ -100,15 +101,17 @@ export async function createFromText(
     invoicePeriod: null,
     invoiceKey: null,
     invoiceRandomCode: null,
+    // 附照片不等於欄位比較可信——照片只是證據，金額仍是手打的。
+    // sourceType 影響 §7.3 的 merge 優先序，等 QR 真的解出欄位才改成 'photo'。
     sourceType: 'manual',
-    photoId: null,
+    photoId: photo?.id ?? null,
     rawRecognition: null,
     note: '',
     createdAt: now,
     updatedAt: now,
   }
 
-  const save = await saveRecord(storage, record, { now })
+  const save = await saveRecord(storage, record, { now, photo })
   await recordHits(storage, classified.matchedRuleIds, now)
 
   return { ok: true, parse, save }
@@ -287,6 +290,44 @@ export async function updateRecordFields(
 
   await storage.put('records', next)
   return next
+}
+
+/** 替既有紀錄換一張照片。舊照片在同一個 transaction 內刪掉，不留孤兒。 */
+export async function attachPhoto(
+  storage: StoragePort,
+  record: SpendRecord,
+  photo: Photo,
+  now = Date.now(),
+): Promise<SpendRecord> {
+  const next: SpendRecord = { ...record, photoId: photo.id, updatedAt: now }
+  const previousId = record.photoId
+
+  await storage.transaction(['records', 'photos'], async (tx) => {
+    if (previousId && previousId !== photo.id) await tx.delete('photos', previousId)
+    await tx.put('photos', photo)
+    await tx.put('records', next)
+  })
+  return next
+}
+
+export async function removePhoto(
+  storage: StoragePort,
+  record: SpendRecord,
+  now = Date.now(),
+): Promise<SpendRecord> {
+  if (!record.photoId) return record
+  const next: SpendRecord = { ...record, photoId: null, updatedAt: now }
+  const previousId = record.photoId
+
+  await storage.transaction(['records', 'photos'], async (tx) => {
+    await tx.delete('photos', previousId)
+    await tx.put('records', next)
+  })
+  return next
+}
+
+export function getPhoto(storage: StoragePort, id: string): Promise<Photo | undefined> {
+  return storage.get<Photo>('photos', id)
 }
 
 export async function deleteRecord(storage: StoragePort, record: SpendRecord): Promise<void> {

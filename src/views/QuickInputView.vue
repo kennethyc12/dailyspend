@@ -4,12 +4,14 @@ import { getStorage } from '@/storage'
 import { createFromText } from '@/services/entryService'
 import { categoryName, refreshRecords, useRecords } from '@/composables/useRecords'
 import { initStorage, useStorageStatus } from '@/composables/useStorageStatus'
+import { usePhotoPicker } from '@/composables/usePhotoPicker'
 import { todayIso } from '@/parsing/quickInput'
 import type { SpendRecord } from '@/models/types'
 
 const storage = getStorage()
 const { records } = useRecords()
 const { state } = useStorageStatus()
+const picker = usePhotoPicker()
 
 const text = ref('')
 const saving = ref(false)
@@ -39,7 +41,7 @@ async function submit() {
   errorMsg.value = null
 
   try {
-    const result = await createFromText(storage, text.value)
+    const result = await createFromText(storage, text.value, Date.now(), picker.photo.value ?? undefined)
     if (!result.ok) {
       errorMsg.value = BLOCKED_MESSAGE[result.blocked]
       return
@@ -49,6 +51,7 @@ async function submit() {
     lastWasPending.value = result.save.record.status === 'pending'
     lastWasMerged.value = result.save.action === 'merge'
     text.value = ''
+    picker.clear()
     await refreshRecords()
   } catch (err) {
     // 吞掉錯誤會讓使用者看到「按鈕沒反應」，這是 Phase 6 踩過的坑。
@@ -76,6 +79,26 @@ async function submit() {
         :disabled="saving || state !== 'ready'"
       />
       <p class="hint">格式：店家 品項 金額。日期預設今天，可用「昨天」或「10/3」開頭。</p>
+
+      <label class="photo-pick">
+        <span v-if="picker.working.value">照片處理中…</span>
+        <span v-else-if="picker.photo.value">已附照片，點此更換</span>
+        <span v-else>📷 附上發票照片（選填）</span>
+        <input
+          type="file"
+          accept="image/*"
+          capture="environment"
+          :disabled="saving || picker.working.value"
+          @change="picker.pick"
+        />
+      </label>
+
+      <div v-if="picker.previewUrl.value" class="preview">
+        <img :src="picker.previewUrl.value" alt="發票照片預覽" />
+        <button type="button" class="btn-text" @click="picker.clear()">移除照片</button>
+      </div>
+
+      <p v-if="picker.error.value" class="result warn">{{ picker.error.value }}</p>
       <button class="btn-primary" type="submit" :disabled="saving || state !== 'ready' || !text.trim()">
         {{ saving ? '存檔中…' : state !== 'ready' ? '準備中…' : '存檔' }}
       </button>
@@ -129,6 +152,33 @@ async function submit() {
 
 form button {
   margin-top: var(--space-3);
+}
+
+.photo-pick {
+  display: block;
+  margin-bottom: var(--space-3);
+  padding: var(--space-3);
+  border: 1px dashed var(--c-border);
+  border-radius: var(--radius);
+  text-align: center;
+  font-size: 14px;
+  color: var(--c-text-dim);
+}
+
+.photo-pick input {
+  display: none;
+}
+
+.preview {
+  margin-bottom: var(--space-3);
+  text-align: center;
+}
+
+.preview img {
+  max-width: 100%;
+  max-height: 220px;
+  border-radius: var(--radius);
+  border: 1px solid var(--c-border);
 }
 
 .list {

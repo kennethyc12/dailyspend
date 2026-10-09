@@ -5,6 +5,7 @@ import type { Rule, RuleOrigin } from '@/models/types'
 import { deleteRule, listRules, setRuleActive } from '@/services/ruleService'
 import { categoryName, refreshRecords, useRecords } from '@/composables/useRecords'
 import { initStorage, useStorageStatus } from '@/composables/useStorageStatus'
+import type { Settings } from '@/models/types'
 import { useDisplayMode } from '@/composables/useDisplayMode'
 
 const storage = getStorage()
@@ -53,6 +54,30 @@ function toggle(rule: Rule) {
 
 function remove(rule: Rule) {
   return act(() => deleteRule(storage, rule.id))
+}
+
+const PHOTO_FIELDS: Array<{ key: keyof Settings['photo']; label: string; step: number }> = [
+  { key: 'maxEdge', label: '原圖長邊上限（px）', step: 100 },
+  { key: 'thumbEdge', label: '縮圖長邊（px）', step: 40 },
+  { key: 'quality', label: 'JPEG 品質（0–1）', step: 0.05 },
+]
+
+/** 壓太狠會讓發票 QR 解不出來，所以做成可調，Phase 9 用真實發票實測後再定。 */
+async function updatePhotoSetting(key: keyof Settings['photo'], value: number) {
+  const current = settings.value
+  if (!current || !Number.isFinite(value) || value <= 0) return
+
+  const next: Settings = {
+    ...current,
+    photo: { ...current.photo, [key]: value },
+    updatedAt: Date.now(),
+  }
+  try {
+    await storage.put('settings', next)
+    await initStorage()
+  } catch (err) {
+    errorMsg.value = (err as Error).message
+  }
 }
 
 function mb(bytes: number) {
@@ -114,6 +139,23 @@ function mb(bytes: number) {
           </div>
         </li>
       </ul>
+    </section>
+
+    <section v-if="settings" class="panel">
+      <h2>照片壓縮</h2>
+      <p class="hint">
+        影響儲存空間，也影響發票 QR 解不解得出來。等 Phase 9 拿真實發票實測後再定。
+      </p>
+      <label v-for="f in PHOTO_FIELDS" :key="f.key" class="field">
+        <span>{{ f.label }}</span>
+        <input
+          type="number"
+          inputmode="decimal"
+          :step="f.step"
+          :value="settings.photo[f.key]"
+          @change="updatePhotoSetting(f.key, Number(($event.target as HTMLInputElement).value))"
+        />
+      </label>
     </section>
 
     <section class="panel">
@@ -226,6 +268,26 @@ function mb(bytes: number) {
 .toggle {
   font-size: 15px;
   font-weight: 600;
+}
+
+.field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-top: var(--space-2);
+  font-size: 13px;
+}
+
+.field input {
+  width: 100px;
+  padding: var(--space-2);
+  border: 1px solid var(--c-border);
+  border-radius: 8px;
+  background: var(--c-bg);
+  color: var(--c-text);
+  font-size: 16px;
+  text-align: right;
 }
 
 dl {

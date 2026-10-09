@@ -4,11 +4,15 @@ import { useRoute, useRouter } from 'vue-router'
 import { getStorage } from '@/storage'
 import type { SpendRecord } from '@/models/types'
 import {
+  attachPhoto,
   correctCategory,
   deleteRecord,
+  getPhoto,
   getRecord,
+  removePhoto,
   updateRecordFields,
 } from '@/services/entryService'
+import { usePhotoPicker } from '@/composables/usePhotoPicker'
 import { activeCategories, categoryName, refreshRecords } from '@/composables/useRecords'
 import { initStorage } from '@/composables/useStorageStatus'
 
@@ -22,6 +26,7 @@ const saving = ref(false)
 const errorMsg = ref<string | null>(null)
 const message = ref<string | null>(null)
 const confirmingDelete = ref(false)
+const picker = usePhotoPicker()
 const perItemNeeded = ref(false)
 
 const date = ref('')
@@ -55,8 +60,15 @@ onMounted(async () => {
   await initStorage()
   try {
     const r = await getRecord(storage, String(route.params.id))
-    if (r) fill(r)
-    else errorMsg.value = '找不到這筆紀錄'
+    if (!r) {
+      errorMsg.value = '找不到這筆紀錄'
+      return
+    }
+    fill(r)
+    if (r.photoId) {
+      const existing = await getPhoto(storage, r.photoId)
+      if (existing) picker.showPreview(existing.blob)
+    }
   } catch (err) {
     errorMsg.value = (err as Error).message
   } finally {
@@ -128,6 +140,28 @@ function skipPerItem() {
     )
     fill(next)
     perItemNeeded.value = false
+  })
+}
+
+function onPickPhoto(event: Event) {
+  const r = record.value
+  if (!r) return
+  return act(async () => {
+    const picked = await picker.pick(event)
+    if (!picked) return
+    fill(await attachPhoto(storage, r, picked))
+    picker.showPreview(picked.blob)
+    message.value = '照片已更新'
+  })
+}
+
+function dropPhoto() {
+  const r = record.value
+  if (!r) return
+  return act(async () => {
+    fill(await removePhoto(storage, r))
+    picker.clear()
+    message.value = '照片已移除'
   })
 }
 
@@ -222,6 +256,29 @@ function remove() {
         </div>
       </section>
 
+      <section class="panel">
+        <h2>發票照片</h2>
+        <div v-if="picker.previewUrl.value" class="preview">
+          <img :src="picker.previewUrl.value" alt="發票照片" />
+        </div>
+        <p v-else class="hint">尚未附照片。</p>
+
+        <label class="photo-pick">
+          {{ picker.working.value ? '照片處理中…' : record.photoId ? '更換照片' : '📷 附上照片' }}
+          <input
+            type="file"
+            accept="image/*"
+            capture="environment"
+            :disabled="saving || picker.working.value"
+            @change="onPickPhoto"
+          />
+        </label>
+        <button v-if="record.photoId" class="btn-text danger" :disabled="saving" @click="dropPhoto">
+          移除照片
+        </button>
+        <p v-if="picker.error.value" class="result warn">{{ picker.error.value }}</p>
+      </section>
+
       <p v-if="message" class="result ok">{{ message }}</p>
 
       <section class="panel danger">
@@ -271,6 +328,32 @@ function remove() {
 
 .mt {
   margin-top: var(--space-2);
+}
+
+.preview {
+  text-align: center;
+  margin-bottom: var(--space-3);
+}
+
+.preview img {
+  max-width: 100%;
+  max-height: 320px;
+  border-radius: var(--radius);
+  border: 1px solid var(--c-border);
+}
+
+.photo-pick {
+  display: block;
+  padding: var(--space-3);
+  border: 1px dashed var(--c-border);
+  border-radius: var(--radius);
+  text-align: center;
+  font-size: 14px;
+  color: var(--c-text-dim);
+}
+
+.photo-pick input {
+  display: none;
 }
 
 .per-item {

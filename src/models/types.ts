@@ -103,5 +103,7 @@ export interface Settings {
   export: { delimiter: string; encoding: string }
   backup: { remindAfterDays: number; lastBackupAt: number | null }
   platform: { persistGranted: boolean | null }
+  /** 壓縮參數會影響 QR 還解不解得出來，所以做成可調而不是寫死。 */
+  photo: { maxEdge: number; thumbEdge: number; quality: number }
   updatedAt: number
 }

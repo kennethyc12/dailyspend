@@ -53,7 +53,10 @@ const total = computed(() => filtered.value.reduce((s, r) => s + r.amount, 0))
         <li v-for="r in g.items" :key="r.id">
           <RouterLink :to="`/records/${r.id}`" class="entry">
           <div class="row">
-            <span class="merchant">{{ r.merchant || '（無店家）' }}</span>
+            <span class="merchant">
+              {{ r.merchant || '（無店家）' }}
+              <span v-if="r.photoId" class="has-photo" title="有發票照片">📷</span>
+            </span>
             <span class="amount">${{ r.amount }}</span>
           </div>
           <div class="row sub">
@@ -113,6 +116,10 @@ const total = computed(() => filtered.value.reduce((s, r) => s + r.amount, 0))
 
 .amount {
   font-variant-numeric: tabular-nums;
+}
+
+.has-photo {
+  font-size: 12px;
 }
 
 .sub {

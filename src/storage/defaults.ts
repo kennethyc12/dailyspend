@@ -42,6 +42,43 @@ export function defaultSettings(now = Date.now()): Settings {
     export: { delimiter: ',', encoding: 'utf-8-bom' },
     backup: { remindAfterDays: 7, lastBackupAt: null },
     platform: { persistGranted: null },
+    photo: { maxEdge: 1600, thumbEdge: 320, quality: 0.8 },
     updatedAt: now,
   }
+}
+
+type Group = keyof Omit<Settings, 'key' | 'updatedAt'>
+
+/**
+ * 舊版 settings 補上新欄位。
+ *
+ * settings 是單一文件、不走 schema version，所以新增欄位時手機上的舊資料
+ * 會缺鍵，讀回來直接是 undefined。每次開啟都跑一次合併，比寫 migration 便宜，
+ * 也不怕漏跑。
+ */
+export function migrateSettings(stored: Partial<Settings> | undefined, now = Date.now()): Settings {
+  const base = defaultSettings(now)
+  if (!stored) return base
+
+  const merged = { ...base, ...stored, key: 'settings' as const }
+
+  for (const group of Object.keys(base) as Array<keyof Settings>) {
+    if (group === 'key' || group === 'updatedAt') continue
+    const defaults = base[group as Group]
+    const value = stored[group as Group]
+    if (typeof defaults === 'object' && defaults !== null) {
+      merged[group as Group] = { ...defaults, ...(value ?? {}) } as never
+    }
+  }
+
+  // thresholds 多一層，單層展開蓋不到。
+  merged.thresholds = { ...base.thresholds }
+  for (const key of Object.keys(base.thresholds) as Array<keyof Settings['thresholds']>) {
+    merged.thresholds[key] = {
+      ...base.thresholds[key],
+      ...(stored.thresholds?.[key] ?? {}),
+    } as never
+  }
+
+  return merged
 }

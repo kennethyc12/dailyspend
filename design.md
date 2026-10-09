@@ -409,6 +409,26 @@ v0.1 寫的是「`BarcodeDetector` 原生 API，不支援時 fallback」。**v0.
 
 **初步傾向 `zxing-wasm`**，理由是「切左右半張」是我們自己引入的不確定性來源。但**不先定案**——樣本到手後用實際照片各測一次（成功率、耗時、不同拍攝角度）再決定，結果寫回本節。
 
+### 5.2.1 拍照管線已完成（Phase 9a），QR 解析待樣本
+
+Phase 9 拆成兩半：**不依賴樣本的拍照管線先做**，QR 解析等樣本。
+
+已完成：`<input type="file" capture="environment">` → `compressPhoto()` → 存成
+`Photo` → 與紀錄同一個 transaction 寫入 → 列表與編輯頁顯示、可更換可移除。
+
+兩個實作決定：
+
+**壓縮參數做成可調**（`settings.photo.maxEdge / thumbEdge / quality`，預設 1600 / 320 / 0.8），
+設定頁可改。這組數字原本是為了省空間訂的，**沒有驗證過壓完還解不解得出 QR**。
+拿到真實發票後第一件事就是測這個，所以不能寫死。
+
+**附照片不改 `sourceType`。** 照片只是證據，金額仍是手打的。`sourceType` 影響
+§7.3 的 merge 優先序（`qr > manual`），附張圖就讓欄位升級成「比手輸可信」是錯的。
+等 QR 真的解出欄位，才改成 `'photo'`。
+
+**EXIF 方向必須套用**：`createImageBitmap(file, { imageOrientation: 'from-image' })`。
+iPhone 拍的照片方向放在 EXIF 裡，不套用存進去的圖會是躺著的。
+
 ### 5.3 流程
 
 ```
