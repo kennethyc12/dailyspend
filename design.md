@@ -1,6 +1,6 @@
 # DailySpend 設計文件 v0.2
 
-> 狀態：**Phase 1–5 已實作並驗收**（見 §14）。本文件隨實作同步更新，標註「Phase N 補定」的段落是實作時才定案的規格缺口。
+> 狀態：**Phase 1–6 已實作，Phase 6 待真機驗收**（見 §14）。本文件隨實作同步更新，標註「Phase N 補定」的段落是實作時才定案的規格缺口。
 > 技術選型已定：Vue 3 PWA + IndexedDB，**目標平台 iPhone（iOS Safari，standalone 模式）**。
 > 待補輸入：發票 QR 原始文字樣本、載具明細樣本（缺樣本前不撰寫解析欄位邏輯）。
 >
@@ -77,6 +77,7 @@ interface Tx {                       // 自定義，非 IDBTransaction
   get<T>(store: StoreName, id: StoreKey): Promise<T | undefined>
   getByIndex<T>(store: StoreName, index: string, key: StoreKey): Promise<T | undefined>
   delete(store: StoreName, id: StoreKey): Promise<void>
+  clear(store: StoreName): Promise<void>
 }
 
 interface StoragePort {
@@ -87,6 +88,7 @@ interface StoragePort {
   getAll<T>(store: StoreName): Promise<T[]>
   count(store: StoreName): Promise<number>
   delete(store: StoreName, id: StoreKey): Promise<void>
+  clear(store: StoreName): Promise<void>      // Phase 6 補上，還原備份用
   transaction<T>(stores: StoreName[], fn: (tx: Tx) => Promise<T>): Promise<T>
   estimateUsage(): Promise<{ usage: number; quota: number | null }>
   requestPersist(): Promise<boolean>
@@ -748,7 +750,36 @@ else
     → <a download> fallback
 ```
 
-`navigator.share` 必須在**使用者手勢的同步呼叫鏈內**觸發，所以檔案要在按鈕點擊前就準備好，或以 `share(Promise)` 形式處理——這點在 Phase 6 真機驗證。
+`navigator.share` 必須在**使用者手勢的同步呼叫鏈內**觸發。
+
+**實作定案（Phase 6）：進入備份頁時就把 CSV 與 zip 都組好**，按鈕只負責呼叫 `saveFile(預先組好的 File)`。若等按下去才 `await` 組檔，同步鏈已經斷掉，iOS 會擋下分享。還原完成後重新組一次。
+
+`AbortError` 代表使用者自己取消，回傳 `'cancelled'` 而非當成失敗；其他錯誤（不支援、權限）則退回 `<a download>`，確保使用者總是拿得到檔案。
+
+#### 備份檔格式（Phase 6 補定）
+
+```
+dailyspend-backup-YYYY-MM-DD.zip
+├── manifest.json        formatVersion / createdAt / counts
+├── data.json            records · categories · rules · settings · 照片中繼資料
+└── photos/
+    ├── <id>.bin         原圖位元組
+    └── <id>.thumb.bin   縮圖位元組
+```
+
+照片的二進位內容不塞進 JSON：base64 會膨脹 33%，而照片本身已是 JPEG，再壓也沒有意義。`data.json` 只留中繼資料與 MIME type。
+
+**版本檢查**：`manifest.formatVersion` 大於 App 支援的版本時直接擋下並要求更新，不嘗試解讀未知格式。
+
+**照片遺失不擋還原**：zip 裡少了某張照片的位元組時跳過該張，紀錄照常還原——紀錄比照片重要。
+
+#### 還原強制兩步驟（Phase 6 補定）
+
+`prepareRestore()` → 使用者確認 → `commitRestore()`。
+
+第一步解析備份檔並**同時產出當前資料的保險備份**，第二步才覆寫。拆成兩個函式是為了讓「二次確認」與「先自動匯出一份當前備份」在 API 上就是強制的，而不是靠呼叫端自律。UI 上也鎖住順序：沒存下保險備份，「確認覆寫」按鈕是 disabled。
+
+備份檔有問題時在第一步就失敗，既有資料完全沒被碰過。
 
 ### 11.2 備份提醒
 
@@ -858,7 +889,7 @@ Service worker 需要 HTTPS（`localhost` 除外），所以「Mac 跑 dev serve
 | ~~**3**~~ ✅ | `parseQuickInput`（含 §4.3 純數字保護） | §4.2 回測表全過，20 筆 ≥ 95% | Vitest |
 | ~~**4**~~ ✅ | `RuleClassifier` + 規則 CRUD + §6.2 修正學習 | 單元測試涵蓋 §6.1 五條分支與 §6.2 四種情境 | Vitest |
 | ~~**5**~~ ✅ | `buildInvoiceKey` + dedupe/merge | 同 key 重複寫入後筆數為 1，欄位依 §7.3 合併 | Vitest |
-| **6** | **備份 / CSV 匯出 / 還原（Web Share）** | 真機完成一次「匯出 → 存到檔案 App → 還原」完整來回 | 真機 |
+| ~~**6**~~ ⏳ | **備份 / CSV 匯出 / 還原（Web Share）** | 真機完成一次「匯出 → 存到檔案 App → 還原」完整來回 | 真機 |
 | **7** | 最小 UI：快速輸入、列表、待確認佇列 | 開始每日真實記帳 | 真機 |
 | **8** | 分析（§8 四條規則 + 冷啟動 + 建議排序） | 每條結論都附得出 evidence | 真機 |
 | **9** | QR 辨識（含 §5.2 library 實測選型） | 20 張真實發票，號碼/日期/金額 100% | 真機 |
@@ -874,6 +905,7 @@ Phase 3–5 是純邏輯，不受平台影響，可全速在電腦上開發。
 | 3 | 2026-10-08 | 通過（Vitest，不需真機）。§4.2 回測表 6 條全過，20 筆語料庫 20/20 = 100%，總計 52 個剖析測試 |
 | 4 | 2026-10-08 | 通過（Vitest，不需真機）。§6.1 五條分支、§6.2 四種情境、規則 CRUD 與優先序各有測試，共 42 個，專案總計 109 個 |
 | 5 | 2026-10-09 | 通過（Vitest，不需真機）。同發票重複寫入後筆數為 1、載具匯入去重後重複筆數 0、跨年度同號碼視為兩筆、合併時不留孤兒照片。共 35 個，專案總計 144 個 |
+| 6 | — | Vitest 26 個全過（含完整來回：匯出 → 清空 → 還原後照片位元組一致）。**真機驗收待做**：Web Share 在 iOS standalone 的行為只有 iPhone 上測得出來 |
 
 > `persist()` 在 iOS 上取得授權，代表 IndexedDB 不會因閒置被清除。這降低了資料遺失風險，但**不改變 §14 把備份排在 Phase 6 的決定**——持久化防不了使用者刪除 App、換機、或 iOS 在儲存空間不足時的回收。
 

@@ -1,6 +1,7 @@
 import { ref } from 'vue'
 import { getStorage, seed } from '@/storage'
 import { loadActiveRules, seedBuiltinRules } from '@/services/ruleService'
+import { shouldRemindBackup } from '@/services/backupService'
 import type { Category, Settings } from '@/models/types'
 
 export type InitState = 'idle' | 'running' | 'ready' | 'failed'
@@ -9,12 +10,14 @@ const state = ref<InitState>('idle')
 const error = ref<string | null>(null)
 const categoryCount = ref<number | null>(null)
 const ruleCount = ref<number | null>(null)
+const recordCount = ref<number | null>(null)
+const needsBackup = ref(false)
 const settings = ref<Settings | null>(null)
 const persistGranted = ref<boolean | null>(null)
 const usage = ref<{ usage: number; quota: number | null } | null>(null)
 
 export async function initStorage() {
-  if (state.value === 'running' || state.value === 'ready') return
+  if (state.value === 'running') return
   state.value = 'running'
   error.value = null
 
@@ -36,6 +39,8 @@ export async function initStorage() {
     settings.value = loaded
     categoryCount.value = (await storage.getAll<Category>('categories')).length
     ruleCount.value = (await loadActiveRules(storage)).length
+    recordCount.value = await storage.count('records')
+    needsBackup.value = shouldRemindBackup(loaded, recordCount.value)
     usage.value = await storage.estimateUsage()
     state.value = 'ready'
   } catch (e) {
@@ -87,5 +92,15 @@ export async function runBlobRoundTrip(): Promise<BlobRoundTrip> {
 }
 
 export function useStorageStatus() {
-  return { state, error, categoryCount, ruleCount, settings, persistGranted, usage }
+  return {
+    state,
+    error,
+    categoryCount,
+    ruleCount,
+    recordCount,
+    needsBackup,
+    settings,
+    persistGranted,
+    usage,
+  }
 }

@@ -9,7 +9,8 @@ import {
 } from '@/composables/useStorageStatus'
 
 const { isStandalone, platform, devBypass } = useDisplayMode()
-const { state, error, categoryCount, ruleCount, persistGranted, usage } = useStorageStatus()
+const { state, error, categoryCount, ruleCount, recordCount, needsBackup, persistGranted, usage } =
+  useStorageStatus()
 
 const swSupported = 'serviceWorker' in navigator
 const blobResult = ref<BlobRoundTrip | null>(null)
@@ -31,7 +32,11 @@ function mb(bytes: number) {
 <template>
   <main class="home">
     <h1>DailySpend</h1>
-    <p class="phase">Phase 2 儲存層 — 記帳功能尚未實作</p>
+    <p class="phase">Phase 6 備份 — 記帳功能尚未實作</p>
+
+    <RouterLink v-if="needsBackup" to="/backup" class="remind">
+      該備份了 — 資料只存在這支手機上，點這裡匯出一份
+    </RouterLink>
 
     <section class="panel">
       <h2>環境檢查</h2>
@@ -72,6 +77,9 @@ function mb(bytes: number) {
         <dt>啟用中規則</dt>
         <dd>{{ ruleCount === null ? '—' : `${ruleCount} 條` }}</dd>
 
+        <dt>消費紀錄</dt>
+        <dd>{{ recordCount === null ? '—' : `${recordCount} 筆` }}</dd>
+
         <dt>儲存已持久化</dt>
         <dd :class="persistGranted ? 'ok' : 'warn'">
           {{ persistGranted === null ? '瀏覽器不支援' : persistGranted ? '是' : '否（系統拒絕）' }}
@@ -100,6 +108,8 @@ function mb(bytes: number) {
         {{ blobResult.ok ? '通過' : '失敗' }} — {{ blobResult.detail }}
       </p>
     </section>
+
+    <RouterLink to="/backup" class="nav">備份與匯出 →</RouterLink>
   </main>
 </template>
 
@@ -158,6 +168,26 @@ dt {
 
 button:disabled {
   opacity: 0.5;
+}
+
+.remind {
+  display: block;
+  margin-bottom: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius);
+  background: var(--c-accent-dim);
+  color: var(--c-text);
+  font-size: 14px;
+  text-decoration: none;
+}
+
+.nav {
+  display: block;
+  padding: var(--space-3);
+  text-align: center;
+  color: var(--c-accent);
+  font-size: 15px;
+  text-decoration: none;
 }
 
 .ok {

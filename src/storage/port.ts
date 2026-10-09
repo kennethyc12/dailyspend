@@ -20,6 +20,7 @@ export interface Tx {
   get<T>(store: StoreName, id: StoreKey): Promise<T | undefined>
   getByIndex<T>(store: StoreName, index: string, key: StoreKey): Promise<T | undefined>
   delete(store: StoreName, id: StoreKey): Promise<void>
+  clear(store: StoreName): Promise<void>
 }
 
 export interface StoragePort {
@@ -30,6 +31,8 @@ export interface StoragePort {
   getAll<T>(store: StoreName): Promise<T[]>
   count(store: StoreName): Promise<number>
   delete(store: StoreName, id: StoreKey): Promise<void>
+  /** 清空整個 store。還原備份時用，是破壞性操作。 */
+  clear(store: StoreName): Promise<void>
 
   /**
    * fn 內只能 await 本介面的方法。await 任何非儲存層的 Promise（影像壓縮、

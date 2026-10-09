@@ -61,6 +61,10 @@ class IdbTx implements Tx {
   async delete(store: StoreName, id: StoreKey): Promise<void> {
     await wrap(this.tx.objectStore(store).delete(id))
   }
+
+  async clear(store: StoreName): Promise<void> {
+    await wrap(this.tx.objectStore(store).clear())
+  }
 }
 
 export class IndexedDbAdapter implements StoragePort {
@@ -167,6 +171,10 @@ export class IndexedDbAdapter implements StoragePort {
 
   async delete(store: StoreName, id: StoreKey): Promise<void> {
     await this.transaction([store], (tx) => tx.delete(store, id))
+  }
+
+  async clear(store: StoreName): Promise<void> {
+    await this.transaction([store], (tx) => tx.clear(store))
   }
 
   async estimateUsage(): Promise<{ usage: number; quota: number | null }> {
