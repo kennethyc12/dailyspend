@@ -1,13 +1,13 @@
 # DailySpend 進度交接
 
-> 最後更新：2026-10-08
+> 最後更新：2026-10-09
 > 設計文件：[design.md](./design.md) v0.2（所有決策與理由都在那裡，這份只記進度）
 
 ---
 
 ## 現況一句話
 
-Phase 1–6 實作完成，站台已上線，170 個測試全過。**Phase 6 的真機驗收待做**（見下方清單），通過後接 Phase 7 最小 UI。
+Phase 1–6 完成並通過真機驗收，站台已上線，172 個測試全過。下一步是 **Phase 7 最小 UI**——那是開始每天記真帳的階段。
 
 ---
 
@@ -82,7 +82,7 @@ iPhone 上要從**主畫面圖示**開啟，不要用 Safari 分頁（App 會擋
 補定三處規格缺口：號碼格式不做嚴格驗證（樣本未到）、§7.3 第一列的矛盾、
 `user` 優先序只適用於 `categoryId`。
 
-### Phase 6 — 備份 / CSV 匯出 / 還原 ⏳ 待真機驗收
+### Phase 6 — 備份 / CSV 匯出 / 還原 ✅
 
 - CSV 匯出：UTF-8 with BOM、欄位依 §11、支援日期區間
 - 完整備份 zip：`manifest.json` + `data.json` + `photos/<id>.bin`
@@ -97,32 +97,41 @@ iPhone 上要從**主畫面圖示**開啟，不要用 Safari 分頁（App 會擋
 所以進入備份頁時就把 CSV 與 zip 都組好，按鈕只負責呼叫。等按下去才 await
 組檔會讓 iOS 擋掉分享。
 
+**真機抓到一個 Vitest 抓不到的 bug**：還原按下去完全沒反應。原因是
+`restorePreview` 放在 `ref()` 裡，深層代理把每筆 record 變成 Proxy，
+而 IndexedDB 的 structured clone 不接受 Proxy。fake-indexeddb 的實作會
+接受，所以單元測試全綠。改用 `shallowRef` 並補上錯誤顯示後通過。
+
 ### Commit 紀錄
 
 ```
-ba0ee37  記錄 Phase 1、2 的 iPhone 真機驗收結果
-fe620f2  Phase 2: StoragePort、IndexedDbAdapter 與 schema v1
-63e5c0f  修正 CI build：補上 @types/node
-b8bcad7  Phase 1: PWA 骨架、安裝閘門與 GitHub Pages 部署
+482cdf4 修正還原按鈕無反應：Vue 深層響應式物件不可寫入 IndexedDB
+a58546e Phase 6: 備份、CSV 匯出與還原
+242f36f Phase 5: invoiceKey 與去重合併
+6e46733 Phase 4: RuleClassifier、規則 CRUD 與修正學習
+2fe4ab0 Phase 3: parseQuickInput 快速輸入切詞
+5ebb6a6 加入 PROGRESS.md 進度交接文件
+ba0ee37 記錄 Phase 1、2 的 iPhone 真機驗收結果
+fe620f2 Phase 2: StoragePort、IndexedDbAdapter 與 schema v1
+63e5c0f 修正 CI build：補上 @types/node
+b8bcad7 Phase 1: PWA 骨架、安裝閘門與 GitHub Pages 部署
 ```
 
 ---
 
-## 下一步：Phase 6 真機驗收
+## 下一步：Phase 7 — 最小 UI
 
-在 iPhone 上開 https://kennethyc12.github.io/dailyspend/（從主畫面圖示），
-進「備份與匯出」頁：
+**範圍**：快速輸入、紀錄列表、待確認佇列。這是第一個「真的能記帳」的階段。
 
-- [ ] 「匯出 CSV」→ 跳出分享選單 → 存到「檔案」→ 用檔案 App 打開，中文不是亂碼
-- [ ] 「完整備份（zip）」→ 存到「檔案」→ 回到頁面，「上次備份」時間有更新
-- [ ] 「選擇備份檔」→ 挑剛才那個 zip → 出現確認區塊，筆數正確
-- [ ] 「①先存下保險備份」→ 存檔成功後「②確認覆寫」才變成可按
-- [ ] 按「②確認覆寫並還原」→ 顯示「還原完成」，首頁筆數與原本一致
+**規格**：design.md §9（資料流程）、§10（待確認佇列）、§4（快速輸入）
 
-最關鍵的是第 1、2 項：Web Share 在 iOS standalone 的行為只有真機測得出來。
-若分享選單沒跳出來而是直接下載，表示 `canShare` 回 false，要回報給我。
+**驗收**：在 iPhone 上實際記下第一筆帳並看到它出現在列表
 
-驗收通過後接 **Phase 7 最小 UI**（快速輸入、列表、待確認佇列），那是開始每天記真帳的階段。
+**環境**：真機
+
+接上去之後就會開始每天記真帳，也是順手蒐集發票樣本的時機（Phase 9 需要）。
+
+要接續時跟 Claude 說「開始 Phase 7」即可。
 
 ---
 
@@ -178,3 +187,11 @@ push 到 `main` 會自動跑 CI（test → build → deploy）。
 4. **GitHub Pages 沒有 SPA rewrite**：router 用 hash 模式，不要改成 history。
 
 5. **Git remote 走 SSH**：HTTPS 沒有 token，push 會失敗。
+
+6. **Vue 深層響應式物件不可寫進 IndexedDB**：`ref(x).value` 和 `reactive(x)` 都是
+   Proxy，structured clone 會丟 `DataCloneError`。任何之後要寫回資料庫的資料，
+   一律用 `shallowRef` 或 `toRaw`。fake-indexeddb 接受 Proxy，所以單元測試抓不到，
+   只有真機會炸。（design.md §11.3）
+
+7. **UI 的 async handler 一定要 try/catch 並把錯誤顯示出來**。Promise 被吞掉時
+   使用者看到的是「按鈕沒反應」，完全無法除錯。Phase 6 就是這樣卡住的。
