@@ -19,6 +19,10 @@ import { pendingRecords } from '@/composables/useRecords'
       </span>
       <span>待確認</span>
     </RouterLink>
+    <RouterLink to="/analysis" class="tab">
+      <span class="icon">◔</span>
+      <span>分析</span>
+    </RouterLink>
     <RouterLink to="/settings" class="tab">
       <span class="icon">⚙</span>
       <span>設定</span>
@@ -33,7 +37,7 @@ import { pendingRecords } from '@/composables/useRecords'
   right: 0;
   bottom: 0;
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(5, 1fr);
   background: var(--c-surface);
   border-top: 1px solid var(--c-border);
   padding-bottom: var(--safe-bottom);
