@@ -5,6 +5,7 @@ import { createFromText } from '@/services/entryService'
 import { categoryName, refreshRecords, useRecords } from '@/composables/useRecords'
 import { initStorage, useStorageStatus } from '@/composables/useStorageStatus'
 import { usePhotoPicker } from '@/composables/usePhotoPicker'
+import { saveSample } from '@/services/sampleService'
 import { todayIso } from '@/parsing/quickInput'
 import type { SpendRecord } from '@/models/types'
 
@@ -19,6 +20,7 @@ const errorMsg = ref<string | null>(null)
 const lastSaved = shallowRef<SpendRecord | null>(null)
 const lastWasPending = ref(false)
 const lastWasMerged = ref(false)
+const sampleMsg = ref<string | null>(null)
 
 const today = todayIso()
 const todayRecords = computed(() => records.value.filter((r) => r.date === today))
@@ -39,6 +41,7 @@ async function submit() {
   if (saving.value) return
   saving.value = true
   errorMsg.value = null
+  sampleMsg.value = null
 
   try {
     const result = await createFromText(storage, text.value, Date.now(), picker.photo.value ?? undefined)
@@ -56,6 +59,26 @@ async function submit() {
   } catch (err) {
     // 吞掉錯誤會讓使用者看到「按鈕沒反應」，這是 Phase 6 踩過的坑。
     errorMsg.value = `存檔失敗：${(err as Error).message}`
+  } finally {
+    saving.value = false
+  }
+}
+
+// 只存照片、不建紀錄：為了蒐集 Phase 9 的 QR 樣本，這條路徑不需要金額。
+async function submitSample() {
+  const photo = picker.photo.value
+  if (!photo || saving.value) return
+  saving.value = true
+  errorMsg.value = null
+  sampleMsg.value = null
+
+  try {
+    await saveSample(storage, photo)
+    lastSaved.value = null
+    picker.clear()
+    sampleMsg.value = '已存成發票樣本，可在設定頁查看或刪除。'
+  } catch (err) {
+    errorMsg.value = `樣本存檔失敗：${(err as Error).message}`
   } finally {
     saving.value = false
   }
@@ -80,22 +103,43 @@ async function submit() {
       />
       <p class="hint">格式：店家 品項 金額。日期預設今天，可用「昨天」或「10/3」開頭。</p>
 
-      <label class="photo-pick">
-        <span v-if="picker.working.value">照片處理中…</span>
-        <span v-else-if="picker.photo.value">已附照片，點此更換</span>
-        <span v-else>📷 附上發票照片（選填）</span>
-        <input
-          type="file"
-          accept="image/*"
-          capture="environment"
-          :disabled="saving || picker.working.value"
-          @change="picker.pick"
-        />
-      </label>
+      <div class="photo-pick">
+        <p class="pick-state">
+          <span v-if="picker.working.value">照片處理中…</span>
+          <span v-else-if="picker.photo.value">已附照片，可重新選擇</span>
+          <span v-else>附上發票照片（選填）</span>
+        </p>
+        <div class="pick-actions" :class="{ off: saving || picker.working.value }">
+          <label class="btn-text">
+            📷 拍照
+            <input
+              type="file"
+              accept="image/*"
+              capture="environment"
+              :disabled="saving || picker.working.value"
+              @change="picker.pick"
+            />
+          </label>
+          <label class="btn-text">
+            🖼 從相簿選
+            <input
+              type="file"
+              accept="image/*"
+              :disabled="saving || picker.working.value"
+              @change="picker.pick"
+            />
+          </label>
+        </div>
+      </div>
 
       <div v-if="picker.previewUrl.value" class="preview">
         <img :src="picker.previewUrl.value" alt="發票照片預覽" />
-        <button type="button" class="btn-text" @click="picker.clear()">移除照片</button>
+        <div class="preview-actions">
+          <button type="button" class="btn-text" @click="picker.clear()">移除照片</button>
+          <button type="button" class="btn-text" :disabled="saving" @click="submitSample">
+            只存成樣本（不記帳）
+          </button>
+        </div>
       </div>
 
       <p v-if="picker.error.value" class="result warn">{{ picker.error.value }}</p>
@@ -105,6 +149,8 @@ async function submit() {
     </form>
 
     <p v-if="errorMsg" class="result warn">{{ errorMsg }}</p>
+
+    <p v-else-if="sampleMsg" class="result ok">{{ sampleMsg }}</p>
 
     <RouterLink v-else-if="lastSaved" to="/pending" class="result" :class="lastWasPending ? 'warn' : 'ok'">
       <template v-if="lastWasMerged">已合併到同一張發票 ·</template>
@@ -155,7 +201,6 @@ form button {
 }
 
 .photo-pick {
-  display: block;
   margin-bottom: var(--space-3);
   padding: var(--space-3);
   border: 1px dashed var(--c-border);
@@ -169,9 +214,32 @@ form button {
   display: none;
 }
 
+.pick-actions {
+  display: flex;
+  justify-content: center;
+  gap: var(--space-4);
+  margin-top: var(--space-2);
+}
+
+.pick-actions label {
+  cursor: pointer;
+}
+
+/* 點擊目標是 label，input 的 :disabled 不會讓它變灰，所以另外標。 */
+.pick-actions.off {
+  opacity: 0.45;
+  pointer-events: none;
+}
+
 .preview {
   margin-bottom: var(--space-3);
   text-align: center;
+}
+
+.preview-actions {
+  display: flex;
+  justify-content: center;
+  gap: var(--space-3);
 }
 
 .preview img {

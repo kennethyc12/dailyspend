@@ -6,8 +6,11 @@ import { compressPhoto } from '@/photo/compress'
 /**
  * 從檔案輸入拿到照片、壓縮、並管理預覽用的 object URL。
  *
- * §13.4：用 `<input type="file" capture="environment">` 而非 getUserMedia。
+ * §13.4：用 `<input type="file">` 而非 getUserMedia。
  * iOS standalone 下即時鏡頭的權限行為不穩定，而 v1 的流程只需要拍一張。
+ *
+ * 呼叫端放兩個 input：帶 `capture="environment"` 的直接開相機，
+ * 不帶的才會跳相簿／檔案。iOS 上有 capture 就只給相機，沒有相簿選項。
  */
 export function usePhotoPicker() {
   const photo = shallowRef<Photo | null>(null)

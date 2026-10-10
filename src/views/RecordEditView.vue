@@ -263,16 +263,32 @@ function remove() {
         </div>
         <p v-else class="hint">尚未附照片。</p>
 
-        <label class="photo-pick">
-          {{ picker.working.value ? '照片處理中…' : record.photoId ? '更換照片' : '📷 附上照片' }}
-          <input
-            type="file"
-            accept="image/*"
-            capture="environment"
-            :disabled="saving || picker.working.value"
-            @change="onPickPhoto"
-          />
-        </label>
+        <div class="photo-pick">
+          <p class="pick-state">
+            {{ picker.working.value ? '照片處理中…' : record.photoId ? '更換照片' : '附上照片' }}
+          </p>
+          <div class="pick-actions" :class="{ off: saving || picker.working.value }">
+            <label class="btn-text">
+              📷 拍照
+              <input
+                type="file"
+                accept="image/*"
+                capture="environment"
+                :disabled="saving || picker.working.value"
+                @change="onPickPhoto"
+              />
+            </label>
+            <label class="btn-text">
+              🖼 從相簿選
+              <input
+                type="file"
+                accept="image/*"
+                :disabled="saving || picker.working.value"
+                @change="onPickPhoto"
+              />
+            </label>
+          </div>
+        </div>
         <button v-if="record.photoId" class="btn-text danger" :disabled="saving" @click="dropPhoto">
           移除照片
         </button>
@@ -343,7 +359,6 @@ function remove() {
 }
 
 .photo-pick {
-  display: block;
   padding: var(--space-3);
   border: 1px dashed var(--c-border);
   border-radius: var(--radius);
@@ -354,6 +369,23 @@ function remove() {
 
 .photo-pick input {
   display: none;
+}
+
+.pick-actions {
+  display: flex;
+  justify-content: center;
+  gap: var(--space-4);
+  margin-top: var(--space-2);
+}
+
+.pick-actions label {
+  cursor: pointer;
+}
+
+/* 點擊目標是 label，input 的 :disabled 不會讓它變灰，所以另外標。 */
+.pick-actions.off {
+  opacity: 0.45;
+  pointer-events: none;
 }
 
 .per-item {

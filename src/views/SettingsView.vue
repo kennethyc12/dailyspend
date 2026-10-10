@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, shallowRef } from 'vue'
+import { computed, onMounted, onUnmounted, ref, shallowRef } from 'vue'
 import { getStorage } from '@/storage'
-import type { Rule, RuleOrigin } from '@/models/types'
+import type { Photo, Rule, RuleOrigin } from '@/models/types'
 import { deleteRule, listRules, setRuleActive } from '@/services/ruleService'
+import { deleteSample, listSamples } from '@/services/sampleService'
 import { categoryName, refreshRecords, useRecords } from '@/composables/useRecords'
 import { initStorage, useStorageStatus } from '@/composables/useStorageStatus'
 import type { Settings } from '@/models/types'
@@ -35,16 +36,41 @@ async function loadRules() {
   rules.value = await listRules(storage)
 }
 
+const samples = shallowRef<Photo[]>([])
+const sampleUrls = ref<Record<string, string>>({})
+const confirmingSampleId = ref<string | null>(null)
+
+function revokeSampleUrls() {
+  for (const url of Object.values(sampleUrls.value)) URL.revokeObjectURL(url)
+  sampleUrls.value = {}
+}
+
+async function loadSamples() {
+  const list = await listSamples(storage)
+  revokeSampleUrls()
+  samples.value = list
+  sampleUrls.value = Object.fromEntries(
+    list.map((p) => [p.id, URL.createObjectURL(p.thumbBlob)]),
+  )
+}
+
+onUnmounted(revokeSampleUrls)
+
+function removeSample(id: string) {
+  confirmingSampleId.value = null
+  return act(() => deleteSample(storage, id), loadSamples)
+}
+
 onMounted(async () => {
   await initStorage()
-  await Promise.all([refreshRecords(), loadRules()])
+  await Promise.all([refreshRecords(), loadRules(), loadSamples()])
 })
 
-async function act(fn: () => Promise<void>) {
+async function act(fn: () => Promise<void>, reload: () => Promise<void> = loadRules) {
   errorMsg.value = null
   try {
     await fn()
-    await loadRules()
+    await reload()
   } catch (err) {
     errorMsg.value = (err as Error).message
   }
@@ -138,6 +164,35 @@ function mb(bytes: number) {
                 刪除
               </button>
             </span>
+          </div>
+        </li>
+      </ul>
+    </section>
+
+    <section class="panel">
+      <h2>發票樣本 · {{ samples.length }} 張</h2>
+      <p class="hint">
+        只存照片、沒有記帳的發票。在「記一筆」拍照後選「只存成樣本」就會進到這裡。
+        匯出備份（zip）會一起帶出去，Phase 9 的 QR 選型要用。
+      </p>
+
+      <p v-if="samples.length === 0" class="hint">還沒有樣本。</p>
+
+      <ul v-else class="list">
+        <li v-for="p in samples" :key="p.id">
+          <div class="row sample">
+            <img :src="sampleUrls[p.id]" alt="發票樣本縮圖" />
+            <span class="sub">
+              {{ new Date(p.capturedAt).toLocaleString('zh-TW') }}<br />
+              {{ p.width }}×{{ p.height }} · {{ mb(p.bytes) }}
+            </span>
+            <span v-if="confirmingSampleId === p.id" class="rule-actions">
+              <button class="btn-text" @click="confirmingSampleId = null">取消</button>
+              <button class="btn-text danger" @click="removeSample(p.id)">確定刪除</button>
+            </span>
+            <button v-else class="btn-text danger" @click="confirmingSampleId = p.id">
+              刪除
+            </button>
           </div>
         </li>
       </ul>
@@ -284,6 +339,22 @@ function mb(bytes: number) {
 .rule-actions {
   display: flex;
   gap: var(--space-3);
+}
+
+.row.sample {
+  align-items: center;
+}
+
+.row.sample img {
+  width: 64px;
+  height: 64px;
+  object-fit: cover;
+  border-radius: var(--radius);
+  border: 1px solid var(--c-border);
+}
+
+.row.sample .sub {
+  flex: 1;
 }
 
 .danger {
