@@ -12,5 +12,7 @@ export const router = createRouter({
     { path: '/analysis', name: 'analysis', component: () => import('@/views/AnalysisView.vue') },
     { path: '/settings', name: 'settings', component: () => import('@/views/SettingsView.vue') },
     { path: '/backup', name: 'backup', component: () => import('@/views/BackupView.vue') },
+    // 選型用的實驗室，lazy 載入才不會把兩套 QR library 塞進主 bundle。
+    { path: '/qr-lab', name: 'qr-lab', component: () => import('@/views/QrLabView.vue') },
   ],
 })

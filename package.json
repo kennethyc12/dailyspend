@@ -15,8 +15,10 @@
   },
   "dependencies": {
     "fflate": "^0.8.3",
+    "jsqr": "^1.4.0",
     "vue": "^3.5.13",
-    "vue-router": "^4.5.0"
+    "vue-router": "^4.5.0",
+    "zxing-wasm": "^3.1.5"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
