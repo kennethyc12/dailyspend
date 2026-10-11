@@ -6,7 +6,19 @@ import { initStorage } from '@/composables/useStorageStatus'
 import { usePhotoPicker } from '@/composables/usePhotoPicker'
 import { listSamples } from '@/services/sampleService'
 import { compressPhoto } from '@/photo/compress'
-import { runBothEngines, warmUpZxing, type VariantResult } from '@/recognize/qrEngines'
+import {
+  decodeBig5,
+  detectQrCodes,
+  toHex,
+  warmUp,
+  type DetectResult,
+} from '@/recognize/qrDetect'
+
+interface VariantResult {
+  label: string
+  bytes: number
+  detect: DetectResult
+}
 
 const storage = getStorage()
 const picker = usePhotoPicker()
@@ -15,6 +27,8 @@ const samples = shallowRef<Photo[]>([])
 const sampleUrls = ref<Record<string, string>>({})
 const selectedId = ref<string | null>(null)
 const source = shallowRef<Blob | null>(null)
+// 樣本與現拍都已經過 compressPhoto，這裡拿不到相機原圖，標題要說實話。
+const sourceLabel = ref('已壓縮版')
 
 const running = ref(false)
 const progress = ref<string | null>(null)
@@ -52,6 +66,7 @@ onUnmounted(revokeUrls)
 function selectSample(p: Photo) {
   selectedId.value = p.id
   source.value = p.blob
+  sourceLabel.value = `樣本存檔版（${p.width}×${p.height}）`
   picker.clear()
   results.value = []
 }
@@ -61,6 +76,7 @@ async function pickNew(event: Event) {
   if (!photo) return
   selectedId.value = null
   source.value = photo.blob
+  sourceLabel.value = `現選的照片（${photo.width}×${photo.height}）`
   results.value = []
 }
 
@@ -74,11 +90,11 @@ async function run() {
 
   try {
     progress.value = '載入 wasm…'
-    wasmMs.value = await warmUpZxing()
+    wasmMs.value = await warmUp()
 
     const out: VariantResult[] = []
     progress.value = '原檔…'
-    out.push(await runBothEngines(blob, `原檔（${Math.round(blob.size / 1024)} KB）`))
+    out.push({ label: sourceLabel.value, bytes: blob.size, detect: await detectQrCodes(blob) })
 
     for (const preset of PRESETS) {
       progress.value = `${preset.label}…`
@@ -87,7 +103,11 @@ async function run() {
         thumbEdge: 320,
         quality: preset.quality,
       })
-      out.push(await runBothEngines(recompressed.blob, preset.label))
+      out.push({
+        label: preset.label,
+        bytes: recompressed.blob.size,
+        detect: await detectQrCodes(recompressed.blob),
+      })
     }
 
     results.value = out
@@ -107,24 +127,14 @@ function ms(value: number) {
   return `${Math.round(value)} ms`
 }
 
-function jsQrSummary(r: VariantResult) {
-  const perVariant = r.jsQr.map((run) => `${run.variant}:${run.codes.length}`).join(' ')
-  return `${r.jsQrUnique} 個（${perVariant}）`
-}
-
 function payloads(r: VariantResult) {
-  const seen = new Map<string, { from: string; text: string; byteLength: number; hex: string; big5: string | null }>()
-  for (const code of r.zxing.codes) {
-    seen.set(code.text, { from: 'zxing', ...code, hex: code.bytesHex })
-  }
-  for (const run of r.jsQr) {
-    for (const code of run.codes) {
-      if (!seen.has(code.text)) {
-        seen.set(code.text, { from: `jsQR/${run.variant}`, ...code, hex: code.bytesHex })
-      }
-    }
-  }
-  return [...seen.values()]
+  return r.detect.codes.map((code) => ({
+    text: code.text,
+    byteLength: code.bytes.length,
+    hex: toHex(code.bytes),
+    big5: decodeBig5(code.bytes),
+    rotation: code.rotation,
+  }))
 }
 
 async function copy(text: string) {
@@ -140,10 +150,11 @@ async function copy(text: string) {
 
 <template>
   <main class="page">
-    <h1>QR 選型實驗室</h1>
+    <h1>QR 實驗室</h1>
     <p class="hint">
-      design.md §5.2 的實測工具：同一張照片分別餵給 zxing-wasm 與 jsQR，看各自解到幾個碼、
-      耗時多少，並順便測現行壓縮參數解不解得動。判準是**能不能一次拿到一張圖裡的左右兩個 QR**。
+      同一張照片用四種壓縮設定各解一次，看解到幾個碼、耗時多少，並把 payload 原封不動
+      列出來。選型已定案為 zxing-wasm（design.md §5.2）；這一頁留著，是因為欄位切法
+      要靠真實 payload 決定。
     </p>
 
     <section class="panel">
@@ -197,31 +208,26 @@ async function copy(text: string) {
             <tr>
               <th>壓縮設定</th>
               <th>大小</th>
-              <th>zxing</th>
-              <th>jsQR</th>
+              <th>解到幾個</th>
+              <th>耗時</th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="r in results" :key="r.label">
               <td>{{ r.label }}</td>
               <td>{{ kb(r.bytes) }}</td>
-              <td :class="r.zxing.codes.length >= 2 ? 'ok' : 'warn'">
-                {{ r.zxing.codes.length }} 個 · {{ ms(r.zxing.ms) }}
-                <template v-if="r.zxing.error"><br />{{ r.zxing.error }}</template>
+              <td :class="r.detect.codes.length >= 2 ? 'ok' : 'warn'">
+                {{ r.detect.codes.length }} 個
+                <template v-if="r.detect.error"><br />{{ r.detect.error }}</template>
               </td>
-              <td :class="r.jsQrUnique >= 2 ? 'ok' : 'warn'">
-                {{ jsQrSummary(r) }}<br />
-                {{ ms(r.jsQr.reduce((sum, run) => sum + run.ms, 0) + r.decodeMs) }}
-                （含解圖 {{ ms(r.decodeMs) }}）
-              </td>
+              <td>{{ ms(r.detect.ms) }}</td>
             </tr>
           </tbody>
         </table>
         <p class="hint">
-          jsQR 的三個數字是「全圖 / 左半 / 右半」各解到幾個。它一張圖只回一個碼，
-          而且合成圖的測試顯示**兩個碼並排時它連一個都回不出來**，所以非切圖不可。
-          耗時是三次相加再加上 JPEG 解圖——zxing 吃 Blob、在 wasm 內自己解圖，
-          那段時間已經含在它的數字裡，不加上來比較不公平。
+          一張發票是左右兩個 QR，所以「2 個」才是完整解到。耗時含 JPEG 解圖——
+          zxing 吃 Blob，在 wasm 內自己解圖。
+          第一列不是相機原圖：樣本存進資料庫前就已經壓過一次（§5.2.1）。
         </p>
       </section>
 
@@ -230,7 +236,7 @@ async function copy(text: string) {
         <p v-if="payloads(r).length === 0" class="hint">沒有解到任何碼。</p>
         <div v-for="p in payloads(r)" :key="p.text" class="payload">
           <div class="row sub">
-            <span>{{ p.from }} · {{ p.byteLength }} bytes</span>
+            <span>{{ p.byteLength }} bytes · 旋轉 {{ p.rotation }}°</span>
             <button class="btn-text" @click="copy(p.text)">複製</button>
           </div>
           <pre>{{ p.text }}</pre>

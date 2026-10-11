@@ -32,7 +32,11 @@ export default defineConfig({
         ],
       },
       workbox: {
-        globPatterns: ['**/*.{js,css,html,png,svg,woff2}'],
+        // wasm 必須進 precache：離線時沒有它就解不了發票 QR（design.md §5.2.2）。
+        globPatterns: ['**/*.{js,css,html,png,svg,woff2,wasm}'],
+        // zxing 的 reader wasm 約 950 KB，超過 workbox 預設的 2 MiB 上限才需要調，
+        // 這裡只是把數字寫明，免得日後有人換成 full build 時默默被剔除。
+        maximumFileSizeToCacheInBytes: 3 * 1024 * 1024,
         cleanupOutdatedCaches: true,
       },
       devOptions: { enabled: false },

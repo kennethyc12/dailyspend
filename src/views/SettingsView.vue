@@ -176,7 +176,7 @@ function mb(bytes: number) {
         匯出備份（zip）會一起帶出去，Phase 9 的 QR 選型要用。
       </p>
 
-      <RouterLink to="/qr-lab" class="btn-text">QR 選型實驗室 →</RouterLink>
+      <RouterLink to="/qr-lab" class="btn-text">QR 實驗室 →</RouterLink>
 
       <p v-if="samples.length === 0" class="hint">還沒有樣本。</p>
 
