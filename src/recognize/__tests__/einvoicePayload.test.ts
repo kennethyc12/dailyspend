@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { classifyPayload, LEFT_HEADER_LENGTH } from '../einvoicePayload'
+import { classifyPayload, LEFT_HEADER_LENGTH, parseEInvoicePayload } from '../einvoicePayload'
 
 /**
  * 表頭欄位來自財政部規格（字軌 10 + 日期 7 + 隨機碼 4 + 銷售額 8 + 總計額 8 +
@@ -96,5 +96,71 @@ describe('不符規格的 payload', () => {
 
     expect(result.kind).toBe('unknown')
     expect(result.header).toBeNull()
+  })
+})
+
+describe('parseEInvoicePayload', () => {
+  const META = '自訂資料:2:2:0'
+
+  it('左右兩個 QR 的品項接起來，表頭欄位照帶', () => {
+    const result = parseEInvoicePayload([`${leftHeader()}:${META}:咖啡:1:55`, '**:麵包:2:30'])
+
+    expect(result.invoiceNumber).toBe('AB12345678')
+    expect(result.date).toBe('2023-09-12')
+    expect(result.totalAmount).toBe(1050)
+    expect(result.items).toEqual([
+      { name: '咖啡', qty: 1, value: 55 },
+      { name: '麵包', qty: 2, value: 30 },
+    ])
+    expect(result.confidence).toBe(1)
+  })
+
+  it('表頭後的四個中繼欄位不會被當成品項', () => {
+    const result = parseEInvoicePayload([`${leftHeader()}:${META}:咖啡:1:55`])
+
+    expect(result.items).toEqual([{ name: '咖啡', qty: 1, value: 55 }])
+  })
+
+  it('沒有合規左方 QR 時總計額是 null，不從品項加總推算', () => {
+    const result = parseEInvoicePayload([':營養補品回饋金:2:-300:白蘭氏雞精組:2:1479'])
+
+    expect(result.totalAmount).toBeNull()
+    expect(result.items).toEqual([
+      { name: '營養補品回饋金', qty: 2, value: -300 },
+      { name: '白蘭氏雞精組', qty: 2, value: 1479 },
+    ])
+    expect(result.confidence).toBe(0.5)
+    expect(result.notes.join()).toContain('當成純品項解讀')
+  })
+
+  it('負數金額（回饋金）照收', () => {
+    const result = parseEInvoicePayload([`${leftHeader()}:${META}:回饋金:1:-300`])
+
+    expect(result.items[0]).toEqual({ name: '回饋金', qty: 1, value: -300 })
+  })
+
+  it('湊不成三元組的尾巴跳過並留下說明', () => {
+    const result = parseEInvoicePayload([`${leftHeader()}:${META}:咖啡:1:55:麵包:2`])
+
+    expect(result.items).toEqual([{ name: '咖啡', qty: 1, value: 55 }])
+    expect(result.notes.join()).toContain('湊不成')
+  })
+
+  it('數量或單價不是整數時略過該筆，其餘照收', () => {
+    const result = parseEInvoicePayload([`${leftHeader()}:${META}:咖啡:一杯:55:麵包:2:30`])
+
+    expect(result.items).toEqual([{ name: '麵包', qty: 2, value: 30 }])
+    expect(result.notes.join()).toContain('不是整數')
+  })
+
+  it('只有填充星號的右方 QR 不產生品項', () => {
+    const result = parseEInvoicePayload([':咖啡:1:55', '*'.repeat(100)])
+
+    expect(result.items).toEqual([{ name: '咖啡', qty: 1, value: 55 }])
+    expect(result.kinds).toEqual(['unknown', 'right'])
+  })
+
+  it('什麼都沒解到時 confidence 是 0', () => {
+    expect(parseEInvoicePayload([]).confidence).toBe(0)
   })
 })

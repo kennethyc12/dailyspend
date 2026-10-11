@@ -37,7 +37,7 @@ interface Classified {
   pendingReasons: PendingReason[]
 }
 
-async function classify(
+export async function classify(
   storage: StoragePort,
   input: { merchant: string | null; items: { name: string }[] },
 ): Promise<Classified> {

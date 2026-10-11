@@ -120,3 +120,123 @@ export function classifyPayload(text: string): ClassifiedPayload {
     segments: splitSegments(text.slice(LEFT_HEADER_LENGTH)),
   }
 }
+
+/**
+ * 左方 QR 的 77 碼表頭之後，依規格依序是：營業人自行使用區、本條碼記載完整
+ * 品目筆數、該張發票交易品目總筆數、中文編碼參數，四個欄位之後才是品項。
+ */
+const LEFT_META_SEGMENTS = 4
+
+/** 中文編碼參數：0 = UTF-8，1 = Big5。 */
+const ENCODING_LABEL: Record<string, string> = { '0': 'UTF-8', '1': 'Big5' }
+
+export interface RecognizedItem {
+  name: string
+  qty: number
+  /**
+   * 規格把這欄叫「單價」，但第一張實拍樣本無法分辨它是單價還是小計
+   * （`白蘭氏雞精組:2:1479`，2×1479 與 1479 都說得通）。語意未定之前
+   * 不寫進 `RecordItem.unitPrice` 或 `.amount`，只原樣帶著給人看。
+   */
+  value: number
+}
+
+export interface RecognizedInvoice {
+  invoiceNumber: string | null
+  /** 西元 `YYYY-MM-DD`。 */
+  date: string | null
+  randomCode: string | null
+  /** 只有合規左方 QR 才有。沒有就是 null，不從品項推算（會猜錯）。 */
+  totalAmount: number | null
+  salesAmount: number | null
+  items: RecognizedItem[]
+  kinds: PayloadKind[]
+  /** 判讀過程中跳過或存疑的東西。不默默吞掉，直接顯示給使用者。 */
+  notes: string[]
+  /** 0–1。表頭與品項都拿到才是 1。 */
+  confidence: number
+}
+
+function parseTriplets(
+  segments: string[],
+  notes: string[],
+  source: string,
+): RecognizedItem[] {
+  const items: RecognizedItem[] = []
+
+  for (let i = 0; i < segments.length; i += 3) {
+    const [name, qty, value] = [segments[i], segments[i + 1], segments[i + 2]]
+    if (name === undefined || qty === undefined || value === undefined) {
+      notes.push(`${source}最後 ${segments.length - i} 個欄位湊不成「品名:數量:單價」，略過`)
+      break
+    }
+    // 規格沒說金額一定為正——回饋金就是負的，所以只要求是整數。
+    if (!/^-?\d+$/.test(qty) || !/^-?\d+$/.test(value)) {
+      notes.push(`${source}「${name}」的數量或單價不是整數（${qty} / ${value}），略過這筆`)
+      continue
+    }
+    items.push({ name, qty: Number(qty), value: Number(value) })
+  }
+
+  return items
+}
+
+/**
+ * 把一張發票上解到的所有 payload 合成一組欄位。
+ *
+ * **金額只採信左方 QR 的總計額**，不從品項加總推算：品項那欄的語意（單價
+ * 或小計）還沒被任何樣本確認，猜錯會默默存進錯的數字。
+ */
+export function parseEInvoicePayload(texts: string[]): RecognizedInvoice {
+  const notes: string[] = []
+  const items: RecognizedItem[] = []
+  const kinds: PayloadKind[] = []
+  let header: LeftHeader | null = null
+
+  for (const text of texts) {
+    const classified = classifyPayload(text)
+    kinds.push(classified.kind)
+
+    if (classified.kind === 'left' && classified.header) {
+      if (header) notes.push('解到一個以上的左方 QR，只採用第一個')
+      else header = classified.header
+
+      const encoding = classified.segments[3]
+      if (encoding !== undefined && ENCODING_LABEL[encoding] === 'Big5') {
+        notes.push('發票標示品項為 Big5 編碼，若出現亂碼請回報')
+      }
+      items.push(
+        ...parseTriplets(classified.segments.slice(LEFT_META_SEGMENTS), notes, '左方 QR '),
+      )
+      continue
+    }
+
+    if (classified.kind === 'right') {
+      items.push(...parseTriplets(classified.segments, notes, '右方 QR '))
+      continue
+    }
+
+    // 不符規格：第一張實拍樣本就是這樣（只有品項尾段）。整段當三元組試試，
+    // 但要讓使用者知道這張發票沒照規格印。
+    if (classified.segments.length > 0) {
+      notes.push(`有一段 QR ${classified.reason}，已當成純品項解讀`)
+      items.push(...parseTriplets(classified.segments, notes, '不符規格的 QR '))
+    } else {
+      notes.push(`有一段 QR ${classified.reason}`)
+    }
+  }
+
+  const confidence = header ? (items.length > 0 ? 1 : 0.8) : items.length > 0 ? 0.5 : 0
+
+  return {
+    invoiceNumber: header?.invoiceNumber ?? null,
+    date: header?.date ?? null,
+    randomCode: header?.randomCode ?? null,
+    totalAmount: header?.totalAmount ?? null,
+    salesAmount: header?.salesAmount ?? null,
+    items,
+    kinds,
+    notes,
+    confidence,
+  }
+}

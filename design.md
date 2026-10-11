@@ -493,20 +493,35 @@ iPhone 拍的照片方向放在 EXIF 裡，不套用存進去的圖會是躺著�
 這一頁是量測工具，不是 `RecognizerPort` 的實作；偵測本身在
 `src/recognize/qrDetect.ts`。
 
-### 5.3 流程
+### 5.3 流程（已實作）
 
 ```
-照片 Blob（來自 <input type="file" capture="environment">）
-  → 壓縮 (createImageBitmap + OffscreenCanvas)
-  → QR 多碼偵測 (single library)
-  → 左右 QR payload 合併
-  → parseEInvoicePayload(payload)   ← 待樣本
-  → RecognitionResult { fields, recognizeConfidence, raw, errors }
+照片 Blob（<input type="file">，拍照或相簿）
+  → compressPhoto()
+  → detectQrCodes()            zxing-wasm，一次解到左右兩碼
+  → parseEInvoicePayload()     合併左右 payload，拆表頭與品項
+  → 畫面顯示讀到什麼，使用者補店家（與金額）
+  → createFromInvoice()        分類 → saveRecord（去重、合併）
 ```
 
 以上全部在 transaction **之外**完成（§2.2）。
 
+**金額只採信左方 QR 的總計額。** 品項三元組的第三欄規格叫「單價」，但第一張
+實拍樣本無法分辨它是單價還是小計（`白蘭氏雞精組:2:1479`，2×1479 與 1479 都
+說得通），所以不加總、不寫進 `RecordItem.unitPrice` 或 `.amount`，原始值留在
+`rawRecognition`。沒有總計額時由使用者輸入金額，**沒填就不給存**。
+
+語意確認之後要改的只有兩處：`createFromInvoice()` 裡的 `items` 對應，以及
+記一筆頁面那段「不替你加總」的說明。
+
+**wasm 在進入記一筆頁時先暖機**：冷啟動載入約 1 秒（實機實測），不先暖好的話
+會剛好撞在使用者按下拍照之後。
+
 ### 5.4 失敗處理
+
+實作對應：`recognizeConfidence` 由 `parseEInvoicePayload()` 給（表頭+品項=1、
+只有表頭=0.8、只有品項=0.5、什麼都沒有=0），`pendingReasons` 由
+`createFromInvoice()` 補齊。
 
 - 偵測不到 QR → `recognizeConfidence: 0`，`recognition_failed`，**照片仍保存**，使用者手動補欄位。
 - 只偵測到一個 QR → 用左 QR 的欄位，品項留空，`recognition_failed` 不設，但 `classifyConfidence` 依無品項的路徑走。
