@@ -13,6 +13,7 @@ import {
   warmUp,
   type DetectResult,
 } from '@/recognize/qrDetect'
+import { classifyPayload } from '@/recognize/einvoicePayload'
 
 interface VariantResult {
   label: string
@@ -127,6 +128,8 @@ function ms(value: number) {
   return `${Math.round(value)} ms`
 }
 
+const KIND_LABEL = { left: '左方 QR', right: '右方 QR', unknown: '不符規格' } as const
+
 function payloads(r: VariantResult) {
   return r.detect.codes.map((code) => ({
     text: code.text,
@@ -134,8 +137,19 @@ function payloads(r: VariantResult) {
     hex: toHex(code.bytes),
     big5: decodeBig5(code.bytes),
     rotation: code.rotation,
+    classified: classifyPayload(code.text),
   }))
 }
+
+const HEADER_FIELDS = [
+  { key: 'invoiceNumber', label: '發票字軌號碼' },
+  { key: 'date', label: '開立日期' },
+  { key: 'randomCode', label: '隨機碼' },
+  { key: 'salesAmount', label: '銷售額' },
+  { key: 'totalAmount', label: '總計額' },
+  { key: 'buyerBan', label: '買方統編' },
+  { key: 'sellerBan', label: '賣方統編' },
+] as const
 
 async function copy(text: string) {
   try {
@@ -236,9 +250,27 @@ async function copy(text: string) {
         <p v-if="payloads(r).length === 0" class="hint">沒有解到任何碼。</p>
         <div v-for="p in payloads(r)" :key="p.text" class="payload">
           <div class="row sub">
-            <span>{{ p.text.length }} 字 / {{ p.byteLength }} bytes · 旋轉 {{ p.rotation }}°</span>
+            <span>
+              <span class="kind" :class="p.classified.kind">
+                {{ KIND_LABEL[p.classified.kind] }}
+              </span>
+              {{ p.text.length }} 字 / {{ p.byteLength }} bytes · 旋轉 {{ p.rotation }}°
+            </span>
             <button class="btn-text" @click="copy(p.text)">複製</button>
           </div>
+          <p class="sub reason">{{ p.classified.reason }}</p>
+
+          <dl v-if="p.classified.header" class="header-fields">
+            <template v-for="f in HEADER_FIELDS" :key="f.key">
+              <dt>{{ f.label }}</dt>
+              <dd>{{ p.classified.header[f.key] }}</dd>
+            </template>
+          </dl>
+
+          <p v-if="p.classified.segments.length" class="sub">
+            `:` 分隔欄位 {{ p.classified.segments.length }} 個
+          </p>
+
           <pre>{{ p.text }}</pre>
           <button class="btn-text" @click="openPayload = openPayload === p.text ? null : p.text">
             {{ openPayload === p.text ? '收起' : '原始位元組' }}
@@ -358,6 +390,45 @@ pre {
 
 .hex {
   color: var(--c-text-dim);
+}
+
+.kind {
+  display: inline-block;
+  margin-right: var(--space-2);
+  padding: 1px var(--space-2);
+  border-radius: var(--radius);
+  font-size: 12px;
+}
+
+.kind.left,
+.kind.right {
+  background: var(--c-accent-dim);
+  color: var(--c-accent);
+}
+
+.kind.unknown {
+  background: color-mix(in srgb, var(--c-warn) 18%, transparent);
+  color: var(--c-warn);
+}
+
+.reason {
+  margin-top: var(--space-2);
+}
+
+.header-fields {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px var(--space-3);
+  margin-top: var(--space-2);
+  font-size: 13px;
+}
+
+.header-fields dt {
+  color: var(--c-text-dim);
+}
+
+.header-fields dd {
+  font-variant-numeric: tabular-nums;
 }
 
 .row {
