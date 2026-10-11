@@ -236,7 +236,7 @@ async function copy(text: string) {
         <p v-if="payloads(r).length === 0" class="hint">沒有解到任何碼。</p>
         <div v-for="p in payloads(r)" :key="p.text" class="payload">
           <div class="row sub">
-            <span>{{ p.byteLength }} bytes · 旋轉 {{ p.rotation }}°</span>
+            <span>{{ p.text.length }} 字 / {{ p.byteLength }} bytes · 旋轉 {{ p.rotation }}°</span>
             <button class="btn-text" @click="copy(p.text)">複製</button>
           </div>
           <pre>{{ p.text }}</pre>
@@ -345,9 +345,15 @@ pre {
   border-radius: var(--radius);
   background: var(--c-bg);
   font-size: 12px;
-  /* 發票 payload 很長且沒有空白，不折行會把表格撐爆。 */
+  /*
+   * 發票 payload 是一長串沒有空白的字元。`word-break: break-all` 單獨用時，
+   * 某些 WebKit 版本遇到同一個字元重複（例如一整排 `*`）不會斷行，整行就
+   * 超出卡片被裁掉——實機上就是這樣看不到左 QR 的內容。`anywhere` 才保險。
+   */
   white-space: pre-wrap;
-  word-break: break-all;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  max-width: 100%;
 }
 
 .hex {
