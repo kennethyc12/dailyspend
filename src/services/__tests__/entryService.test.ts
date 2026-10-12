@@ -215,6 +215,22 @@ describe('編輯既有紀錄', () => {
     expect((await only()).amount).toBe(55)
   })
 
+  it('保存正規化前的原始輸入，編輯後不變', async () => {
+    await createFromText(storage, '全家　咖啡　５５', NOW)
+    const r = await only()
+    expect(r.rawInput).toBe('全家　咖啡　５５')
+
+    await updateRecordFields(storage, r, { note: '改過' }, NOW + 1)
+    expect((await only()).rawInput).toBe('全家　咖啡　５５')
+  })
+
+  it('日期格式正確但不存在（2026-02-30）時擋下', async () => {
+    await createFromText(storage, '全家 咖啡 55', NOW)
+    const r = await only()
+    await expect(updateRecordFields(storage, r, { date: '2026-02-30' })).rejects.toThrow('日期不存在')
+    expect((await only()).date).toBe(r.date)
+  })
+
   it('日期格式不合法時擋下', async () => {
     await createFromText(storage, '全家 咖啡 55', NOW)
     await expect(

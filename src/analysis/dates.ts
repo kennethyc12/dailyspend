@@ -27,6 +27,18 @@ export function daysInMonth(y: number, m: number): number {
   return new Date(Date.UTC(y, m, 0)).getUTCDate()
 }
 
+export function isValidYmd(y: number, m: number, d: number): boolean {
+  return (
+    Number.isInteger(y) &&
+    Number.isInteger(m) &&
+    Number.isInteger(d) &&
+    m >= 1 &&
+    m <= 12 &&
+    d >= 1 &&
+    d <= daysInMonth(y, m)
+  )
+}
+
 /** `YYYY-MM-DD` → `YYYY-MM` */
 export function monthKey(iso: string): string {
   return iso.slice(0, 7)

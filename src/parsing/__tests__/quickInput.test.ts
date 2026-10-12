@@ -64,6 +64,32 @@ describe('§4.2 回測表', () => {
   })
 })
 
+describe('金額後面的 token', () => {
+  it('全家 咖啡 55 麵包 — 金額後的字併進品項並轉待確認，不默默丟掉', () => {
+    const r = parse('全家 咖啡 55 麵包')
+    expect(shape(r)).toEqual({ merchant: '全家', items: ['咖啡', '麵包'], amount: 55 })
+    expect(r.pendingReasons).toEqual(['tokens_after_amount'])
+  })
+
+  it('55 麵包 — 沒有店家時，金額後的字一樣是品項', () => {
+    const r = parse('55 麵包')
+    expect(shape(r)).toEqual({ merchant: null, items: ['麵包'], amount: 55 })
+    expect(r.pendingReasons.sort()).toEqual(['missing_merchant', 'tokens_after_amount'])
+  })
+
+  it('全家 咖啡 55 元 — 緊接金額的單位屬於金額，不轉待確認', () => {
+    const r = parse('全家 咖啡 55 元')
+    expect(shape(r)).toEqual({ merchant: '全家', items: ['咖啡'], amount: 55 })
+    expect(r.pendingReasons).toEqual([])
+  })
+
+  it('全家 咖啡 55 塊 蛋糕 — 單位之後的字仍是品項', () => {
+    const r = parse('全家 咖啡 55 塊 蛋糕')
+    expect(shape(r)).toEqual({ merchant: '全家', items: ['咖啡', '蛋糕'], amount: 55 })
+    expect(r.pendingReasons).toEqual(['tokens_after_amount'])
+  })
+})
+
 describe('金額剖析', () => {
   it.each([
     ['55', 55],
@@ -96,30 +122,62 @@ describe('金額剖析', () => {
   })
 })
 
+function prefix(token: string, today = TODAY): string | null {
+  const r = parseDatePrefix(token, today)
+  return r === null ? null : r.kind === 'date' ? r.iso : 'invalid'
+}
+
 describe('日期前綴', () => {
   it('今天 / 昨天', () => {
-    expect(parseDatePrefix('今天', TODAY)).toBe(TODAY)
-    expect(parseDatePrefix('昨天', TODAY)).toBe('2026-10-07')
+    expect(prefix('今天')).toBe(TODAY)
+    expect(prefix('昨天')).toBe('2026-10-07')
   })
 
   it('M/D 與 MM-DD 都吃', () => {
-    expect(parseDatePrefix('10/3', TODAY)).toBe('2026-10-03')
-    expect(parseDatePrefix('09-28', TODAY)).toBe('2026-09-28')
+    expect(prefix('10/3')).toBe('2026-10-03')
+    expect(prefix('09-28')).toBe('2026-09-28')
   })
 
   it('未來日期退回去年（錢不會花在未來）', () => {
-    expect(parseDatePrefix('12/25', TODAY)).toBe('2025-12-25')
+    expect(prefix('12/25')).toBe('2025-12-25')
   })
 
-  it('不合法的月日不當日期', () => {
-    expect(parseDatePrefix('13/40', TODAY)).toBeNull()
-    expect(parseDatePrefix('咖啡', TODAY)).toBeNull()
+  it('長得像日期但不存在 → invalid，不當成店家', () => {
+    expect(prefix('13/40')).toBe('invalid')
+    expect(prefix('11/31')).toBe('invalid')
+    expect(prefix('2/30')).toBe('invalid')
+  })
+
+  it('不像日期的 token → null', () => {
+    expect(prefix('咖啡')).toBeNull()
+  })
+
+  it('月底與閏年依回推後的年份判斷', () => {
+    expect(prefix('10/31')).toBe('2025-10-31')
+    expect(prefix('9/30')).toBe('2026-09-30')
+    // 2026-10-08 輸入 2/29 → 落在 2026 年（非閏年）
+    expect(prefix('2/29')).toBe('invalid')
+    // 2028-03-01 輸入 2/29 → 2028 是閏年
+    expect(prefix('2/29', '2028-03-01')).toBe('2028-02-29')
+    // 跨年回推：2029-01-15 輸入 2/29 → 回推到 2028（閏年）才合法
+    expect(prefix('2/29', '2029-01-15')).toBe('2028-02-29')
+    // 跨年回推：2028-01-15 輸入 2/29 → 回推到 2027（非閏年）
+    expect(prefix('2/29', '2028-01-15')).toBe('invalid')
   })
 
   it('7-11 是店家不是 7 月 11 日（破折號形式要求補零兩位）', () => {
-    expect(parseDatePrefix('7-11', TODAY)).toBeNull()
-    expect(parseDatePrefix('07-11', TODAY)).toBe('2026-07-11')
-    expect(parseDatePrefix('7/11', TODAY)).toBe('2026-07-11')
+    expect(prefix('7-11')).toBeNull()
+    expect(prefix('07-11')).toBe('2026-07-11')
+    expect(prefix('7/11')).toBe('2026-07-11')
+  })
+
+  it('不存在的日期前綴擋下，不默默把它當成店家', () => {
+    const r = parse('2/29 全家 55')
+    expect(r.blockingError).toBe('invalid_date')
+  })
+
+  it('只有一個像日期的 token 時仍視為金額位置：找不到金額', () => {
+    expect(parse('2/29').blockingError).toBe('amount_missing')
   })
 
   it('單一 token 時視為金額，不視為日期', () => {
@@ -160,7 +218,7 @@ interface Case {
   reasons?: string[]
 }
 
-// 20 筆代表性輸入，驗收門檻 ≥95%（design.md §12 #4）。
+// 代表性輸入，驗收門檻 ≥95%（design.md §12 #4）。原本 20 筆，第 21 筆是金額後接單位的寫法。
 const CORPUS: Case[] = [
   { input: '全家 咖啡 55', merchant: '全家', items: ['咖啡'], amount: 55 },
   { input: '7-11 御飯糰 45', merchant: '7-11', items: ['御飯糰'], amount: 45 },
@@ -217,11 +275,12 @@ const CORPUS: Case[] = [
     reasons: ['ambiguous_item_tokens'],
   },
   { input: '鼎泰豐 小籠包 炒飯 酸辣湯 1,450', merchant: '鼎泰豐', items: ['小籠包', '炒飯', '酸辣湯'], amount: 1450 },
+  { input: '全家 咖啡 55 元', merchant: '全家', items: ['咖啡'], amount: 55 },
 ]
 
-describe('20 筆代表性輸入回測', () => {
-  it('語料庫有 20 筆', () => {
-    expect(CORPUS).toHaveLength(20)
+describe('21 筆代表性輸入回測', () => {
+  it('語料庫有 21 筆', () => {
+    expect(CORPUS).toHaveLength(21)
   })
 
   it.each(CORPUS.map((c) => [c.input, c] as const))('%s', (_input, c) => {
@@ -245,5 +304,6 @@ describe('20 筆代表性輸入回測', () => {
 
     const rate = pass / CORPUS.length
     expect(rate).toBeGreaterThanOrEqual(0.95)
+    expect(pass).toBe(CORPUS.length)
   })
 })

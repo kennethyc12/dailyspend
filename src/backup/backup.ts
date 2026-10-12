@@ -41,6 +41,17 @@ export class BackupFormatError extends Error {
   }
 }
 
+function assertBackupShape(data: unknown): asserts data is BackupData {
+  if (typeof data !== 'object' || data === null) throw new BackupFormatError('data.json 不是物件')
+  const d = data as Partial<Record<keyof BackupData, unknown>>
+  for (const key of ['records', 'categories', 'rules', 'photos'] as const) {
+    if (!Array.isArray(d[key])) throw new BackupFormatError(`備份檔缺少 ${key} 清單`)
+  }
+  if (d.settings !== null && typeof d.settings !== 'object') {
+    throw new BackupFormatError('備份檔的 settings 格式錯誤')
+  }
+}
+
 async function toBytes(blob: Blob): Promise<Uint8Array> {
   return new Uint8Array(await blob.arrayBuffer())
 }
@@ -99,10 +110,10 @@ export async function readBackup(file: Blob): Promise<ParsedBackup> {
   }
 
   let manifest: BackupManifest
-  let data: BackupData
+  let data: unknown
   try {
     manifest = JSON.parse(strFromU8(manifestBytes)) as BackupManifest
-    data = JSON.parse(strFromU8(dataBytes)) as BackupData
+    data = JSON.parse(strFromU8(dataBytes))
   } catch {
     throw new BackupFormatError('備份檔內容損毀')
   }
@@ -113,8 +124,10 @@ export async function readBackup(file: Blob): Promise<ParsedBackup> {
     )
   }
 
+  assertBackupShape(data)
+
   const photos: Photo[] = []
-  for (const meta of data.photos ?? []) {
+  for (const meta of data.photos) {
     const blobBytes = entries[`${PHOTO_DIR}/${meta.id}.bin`]
     const thumbBytes = entries[`${PHOTO_DIR}/${meta.id}.thumb.bin`]
     // 照片遺失不該讓整份備份無法還原——紀錄本身比照片重要。
@@ -149,9 +162,9 @@ export async function restoreBackup(storage: StoragePort, parsed: ParsedBackup):
       await tx.clear('photos')
       await tx.clear('settings')
 
-      for (const r of data.records ?? []) await tx.put('records', r)
-      for (const c of data.categories ?? []) await tx.put('categories', c)
-      for (const r of data.rules ?? []) await tx.put('rules', r)
+      for (const r of data.records) await tx.put('records', r)
+      for (const c of data.categories) await tx.put('categories', c)
+      for (const r of data.rules) await tx.put('rules', r)
       for (const p of photos) await tx.put('photos', p)
       if (data.settings) await tx.put('settings', data.settings)
     },

@@ -3,7 +3,8 @@ import { IDBFactory } from 'fake-indexeddb'
 import type { Photo, SpendRecord } from '@/models/types'
 import { IndexedDbAdapter, seed } from '@/storage'
 import { seedBuiltinRules } from '@/services/ruleService'
-import type { RecognizedInvoice } from '@/recognize/einvoicePayload'
+import { parseEInvoicePayload, type RecognizedInvoice } from '@/recognize/einvoicePayload'
+import { leftQr } from '@/test/fixtures'
 import { createFromInvoice } from '../invoiceService'
 
 const NOW = Date.UTC(2026, 9, 11, 4, 0, 0)
@@ -195,3 +196,22 @@ describe('從發票存檔', () => {
     expect((await only()).items.map((i) => i.name)).toEqual(['回饋金', '雞精'])
   })
 })
+
+describe('一張照片讀到多張發票', () => {
+  it('拒絕帶入後手輸金額存檔 → 沒有品項、進待確認，不是默默存成已確認', async () => {
+    const rejected = parseEInvoicePayload([
+      leftQr({ invoiceNumber: 'AA12345678' }),
+      leftQr({ invoiceNumber: 'BB12345678' }),
+    ])
+
+    const result = await createFromInvoice(storage, { recognized: rejected, merchant: '全家', amount: 120 }, NOW)
+    expect(result.ok).toBe(true)
+
+    const r = await only()
+    expect(r.items).toEqual([])
+    expect(r.invoiceNumber).toBeNull()
+    expect(r.status).toBe('pending')
+    expect(r.pendingReasons).toContain('recognition_failed')
+  })
+})
+

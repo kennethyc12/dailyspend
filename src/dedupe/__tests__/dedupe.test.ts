@@ -95,6 +95,13 @@ describe('§7.1 invoiceKey', () => {
     }
   })
 
+  it('不存在的日期（2/30、非閏年 2/29、11/31）不產生 key', () => {
+    for (const d of ['2026-02-30', '2026-02-29', '2026-11-31']) {
+      expect(buildInvoicePeriod(d)).toBeNull()
+    }
+    expect(buildInvoicePeriod('2028-02-29')).toBe('11701')
+  })
+
   it('號碼正規化：去空白與破折號、轉大寫', () => {
     expect(normalizeInvoiceNumber(' ab-1234 5678 ')).toBe('AB12345678')
     expect(normalizeInvoiceNumber('')).toBeNull()

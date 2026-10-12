@@ -30,6 +30,7 @@ const REASON_TEXT: Record<PendingReason, string> = {
   multi_item_correction: '多品項曾整筆改過分類，品項分類可能不準',
   missing_merchant: '缺少店家',
   missing_invoice_date: '有發票號碼但日期不完整，無法去重',
+  tokens_after_amount: '金額後面還有字，已當成品項，請確認',
 }
 
 function togglePerItem(id: string, on: boolean) {

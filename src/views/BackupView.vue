@@ -13,7 +13,7 @@ import {
 } from '@/services/backupService'
 import { useStorageStatus, initStorage } from '@/composables/useStorageStatus'
 
-const { settings } = useStorageStatus()
+const { settings, state: storageState } = useStorageStatus()
 const storage = getStorage()
 
 // iOS 要求 navigator.share 在使用者手勢的同步呼叫鏈內，所以檔案必須先備好，
@@ -122,15 +122,24 @@ async function confirmRestore() {
   restoring.value = true
   try {
     const preview = restorePreview.value
-    await commitRestore(storage, preview)
+    const count = preview.parsed.data.records.length
+    try {
+      await commitRestore(storage, preview)
+    } catch (err) {
+      // 還原是整個 App 最危險的操作，絕不能無聲失敗。transaction 失敗會整批回滾，所以這句話才成立。
+      fail('還原失敗，資料未變更', err)
+      return
+    }
     restorePreview.value = null
     safetyDelivered.value = false
+    // initStorage 會自己 catch 錯誤，不會往外拋，只能看狀態
     await initStorage()
+    if (storageState.value === 'failed') {
+      errorMsg.value = `還原已完成（${count} 筆），但重新載入失敗，請重新開啟 App`
+      return
+    }
     await prepareFiles()
-    message.value = `還原完成，共 ${preview.parsed.data.records.length} 筆紀錄`
-  } catch (err) {
-    // 還原是整個 App 最危險的操作，絕不能無聲失敗。
-    fail('還原失敗，資料未變更', err)
+    message.value = `還原完成，共 ${count} 筆紀錄`
   } finally {
     restoring.value = false
   }

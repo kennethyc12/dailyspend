@@ -52,6 +52,7 @@ onMounted(async () => {
 const BLOCKED_MESSAGE = {
   empty_input: '請輸入內容，例如「全家 咖啡 55」',
   amount_missing: '找不到金額。格式是「店家 品項 金額」，例如「全家 咖啡 55」',
+  invalid_date: '日期不存在，例如 2/30。請改成正確的日期，或拿掉日期（預設今天）',
 } as const
 
 async function submit() {

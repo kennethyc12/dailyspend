@@ -13,6 +13,7 @@ export type PendingReason =
   | 'multi_item_correction'
   | 'missing_merchant'
   | 'missing_invoice_date'
+  | 'tokens_after_amount'
 
 export interface RecordItem {
   name: string
@@ -41,6 +42,8 @@ export interface SpendRecord {
   sourceType: SourceType
   photoId: string | null
   rawRecognition: unknown | null
+  /** 文字輸入時使用者打的原字串（未正規化）。只在建立時寫入，編輯不改。 */
+  rawInput?: string
   note: string
   createdAt: number
   updatedAt: number

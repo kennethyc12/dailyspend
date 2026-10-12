@@ -1,3 +1,5 @@
+import { isValidYmd } from '@/analysis/dates'
+
 /**
  * 判別一段 QR payload 是不是合規的電子發票二維條碼，並拆出左方 QR 的固定表頭。
  *
@@ -49,8 +51,7 @@ function rocToIso(roc: string): string | null {
   const month = roc.slice(3, 5)
   const day = roc.slice(5, 7)
   if (!Number.isInteger(year) || year <= 0) return null
-  if (Number(month) < 1 || Number(month) > 12) return null
-  if (Number(day) < 1 || Number(day) > 31) return null
+  if (!isValidYmd(year + 1911, Number(month), Number(day))) return null
   return `${year + 1911}-${month}-${day}`
 }
 
@@ -190,16 +191,33 @@ function parseTriplets(
 export function parseEInvoicePayload(texts: string[]): RecognizedInvoice {
   const notes: string[] = []
   const items: RecognizedItem[] = []
-  const kinds: PayloadKind[] = []
+  // 同一個 QR 被偵測到兩次時，內容完全相同，先去掉才不會被當成兩張發票
+  const all = [...new Set(texts)].map(classifyPayload)
+  const kinds = all.map((c) => c.kind)
+
+  // 右方 QR 無法判斷屬於哪一張發票，所以只要有兩個以上左方 QR 就整張不帶入；
+  // 號碼相同但內容不同時同樣拒絕，否則兩邊的品項會重複併入
+  const lefts = all.filter((c) => c.kind === 'left' && c.header)
+  if (lefts.length > 1) {
+    const numbers = [...new Set(lefts.map((c) => c.header!.invoiceNumber))]
+    return {
+      invoiceNumber: null,
+      date: null,
+      randomCode: null,
+      totalAmount: null,
+      salesAmount: null,
+      items: [],
+      kinds,
+      notes: [`同一張照片讀到 ${lefts.length} 個發票左方 QR（${numbers.join('、')}），請一次拍一張`],
+      confidence: 0,
+    }
+  }
+
   let header: LeftHeader | null = null
 
-  for (const text of texts) {
-    const classified = classifyPayload(text)
-    kinds.push(classified.kind)
-
+  for (const classified of all) {
     if (classified.kind === 'left' && classified.header) {
-      if (header) notes.push('解到一個以上的左方 QR，只採用第一個')
-      else header = classified.header
+      header = classified.header
 
       const encoding = classified.segments[3]
       if (encoding !== undefined && ENCODING_LABEL[encoding] === 'Big5') {

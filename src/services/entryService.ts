@@ -6,6 +6,7 @@ import { planCorrection, type CorrectionPlan, type CorrectionScope } from '@/cla
 import { applyCorrection, loadActiveRules, recordHits } from './ruleService'
 import { prepareRecord, saveRecord, type SaveOutcome } from './recordService'
 import type { Settings } from '@/models/types'
+import { isValidYmd, parseIso } from '@/analysis/dates'
 
 /** 歷史店家 + 內建 merchant 規則，用來標記 merchantMatched。 */
 export async function merchantDictionary(storage: StoragePort): Promise<string[]> {
@@ -106,6 +107,7 @@ export async function createFromText(
     sourceType: 'manual',
     photoId: photo?.id ?? null,
     rawRecognition: null,
+    rawInput: parse.raw,
     note: '',
     createdAt: now,
     updatedAt: now,
@@ -225,6 +227,8 @@ export async function updateRecordFields(
 ): Promise<SpendRecord> {
   const date = patch.date ?? record.date
   if (!ISO_DATE.test(date)) throw new ValidationError('日期格式需為 YYYY-MM-DD', 'date')
+  const { y, m, d } = parseIso(date)
+  if (!isValidYmd(y, m, d)) throw new ValidationError('日期不存在', 'date')
 
   const amount = patch.amount ?? record.amount
   if (!Number.isInteger(amount)) throw new ValidationError('金額必須是整數（元）', 'amount')

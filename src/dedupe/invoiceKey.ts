@@ -1,3 +1,5 @@
+import { isValidYmd } from '@/analysis/dates'
+
 const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})$/
 
 /** 台灣發票字軌按期（兩個月）配發：1–2月期=01、3–4月期=03…11–12月期=11。 */
@@ -18,7 +20,7 @@ export function buildInvoicePeriod(date: string | null): string | null {
   const year = Number(m[1])
   const month = Number(m[2])
   const day = Number(m[3])
-  if (month < 1 || month > 12 || day < 1 || day > 31) return null
+  if (!isValidYmd(year, month, day)) return null
 
   const roc = rocYear(year)
   if (roc < 1) return null

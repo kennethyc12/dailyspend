@@ -247,6 +247,33 @@ describe('備份檔驗證', () => {
     await expect(readBackup(future)).rejects.toThrow(/請先更新/)
   })
 
+  async function backupWithData(patch: (data: Record<string, unknown>) => void): Promise<Blob> {
+    const { unzipSync, zipSync, strFromU8, strToU8 } = await import('fflate')
+    const entries = unzipSync(new Uint8Array(await (await createBackup(storage, NOW)).arrayBuffer()))
+    const data = JSON.parse(strFromU8(entries['data.json']!)) as Record<string, unknown>
+    patch(data)
+    entries['data.json'] = strToU8(JSON.stringify(data))
+    return new Blob([zipSync(entries) as BlobPart])
+  }
+
+  it.each(['records', 'categories', 'rules', 'photos'])('data.json 缺 %s 清單 → BackupFormatError', async (key) => {
+    await seed(storage)
+    const broken = await backupWithData((d) => delete d[key])
+    await expect(readBackup(broken)).rejects.toThrow(`備份檔缺少 ${key} 清單`)
+  })
+
+  it('records 不是陣列 → BackupFormatError', async () => {
+    await seed(storage)
+    const broken = await backupWithData((d) => (d.records = { r1: {} }))
+    await expect(readBackup(broken)).rejects.toBeInstanceOf(BackupFormatError)
+  })
+
+  it('settings 欄位缺漏 → BackupFormatError（App 產生的備份一定寫出 null 或物件）', async () => {
+    await seed(storage)
+    const broken = await backupWithData((d) => delete d.settings)
+    await expect(readBackup(broken)).rejects.toThrow('settings 格式錯誤')
+  })
+
   it('照片檔遺失時仍可還原紀錄（紀錄比照片重要）', async () => {
     await seed(storage)
     await saveRecord(storage, rec({ id: 'r1', photoId: 'p1' }), { photo: photo('p1') })
@@ -291,6 +318,37 @@ describe('還原的兩步驟安全機制', () => {
     await commitRestore(storage, preview)
     expect(await storage.count('records')).toBe(1)
     expect(await storage.get('records', 'b')).toBeUndefined()
+  })
+
+  it('commit 中途寫入失敗時整批回滾：清空的資料全部回來', async () => {
+    await seed(storage)
+    await saveRecord(storage, rec({ id: 'keep-1' }))
+    await saveRecord(storage, rec({ id: 'keep-2', amount: 120 }))
+
+    // 兩筆同 invoiceKey 會撞上 unique index，第二筆 put 必定失敗——此時 clear 已經做完了
+    const key = '11509-AB12345678'
+    const { zipSync, strToU8 } = await import('fflate')
+    const conflicting = new Blob([
+      zipSync({
+        'manifest.json': strToU8(JSON.stringify({ formatVersion: BACKUP_FORMAT_VERSION, createdAt: NOW, counts: {} })),
+        'data.json': strToU8(
+          JSON.stringify({
+            records: [rec({ id: 'x1', invoiceKey: key }), rec({ id: 'x2', invoiceKey: key })],
+            categories: [],
+            rules: [],
+            settings: null,
+            photos: [],
+          }),
+        ),
+      }) as BlobPart,
+    ])
+
+    const preview = await prepareRestore(storage, conflicting, new Date(NOW))
+    await expect(commitRestore(storage, preview)).rejects.toThrow()
+
+    const ids = (await storage.getAll<SpendRecord>('records')).map((r) => r.id).sort()
+    expect(ids).toEqual(['keep-1', 'keep-2'])
+    expect(await storage.count('categories')).toBeGreaterThan(0)
   })
 
   it('備份檔壞掉時 prepareRestore 就失敗，不會碰到既有資料', async () => {

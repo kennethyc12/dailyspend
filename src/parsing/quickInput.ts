@@ -1,10 +1,11 @@
 import type { PendingReason } from '@/models/types'
+import { isValidYmd, toIso } from '@/analysis/dates'
 
 export interface ParsedItem {
   name: string
 }
 
-export type BlockingError = 'empty_input' | 'amount_missing'
+export type BlockingError = 'empty_input' | 'amount_missing' | 'invalid_date'
 
 export interface QuickInputParse {
   merchant: string | null
@@ -30,6 +31,9 @@ const FULLWIDTH_OFFSET = 0xfee0
 
 // 允許 55、1,200、55元、$55、NT$55，以及小數。
 const NUMBER_TOKEN = /^(?:NT\$|\$)?(\d{1,3}(?:,\d{3})+|\d+)(\.\d+)?元?$/
+
+// 緊接在金額後的單位屬於金額：「全家 咖啡 55 元」很常見，不該變成叫「元」的品項。
+const AMOUNT_UNIT = /^(?:元|塊)$/
 
 export function normalizeInput(raw: string): string {
   return raw
@@ -65,25 +69,27 @@ function shiftDays(iso: string, delta: number): string {
 // 這個不對稱是刻意的——「7-11」是店家，不是 7 月 11 日，而它是台灣最常見的店家之一。
 const MONTH_DAY = /^(?:(\d{1,2})\/(\d{1,2})|(\d{2})-(\d{2}))$/
 
-/** 首 token 若是日期前綴就回傳解析結果，否則回傳 null。 */
-export function parseDatePrefix(token: string, today: string): string | null {
-  if (token === '今天') return today
-  if (token === '昨天') return shiftDays(today, -1)
+export type DatePrefix = { kind: 'date'; iso: string } | { kind: 'invalid' } | null
+
+/** 首 token 若是日期前綴就回傳解析結果；長得像日期但不存在（2/30）回傳 invalid；否則 null。 */
+export function parseDatePrefix(token: string, today: string): DatePrefix {
+  if (token === '今天') return { kind: 'date', iso: today }
+  if (token === '昨天') return { kind: 'date', iso: shiftDays(today, -1) }
 
   const raw = MONTH_DAY.exec(token)
   if (!raw) return null
-  const m = [raw[0], raw[1] ?? raw[3], raw[2] ?? raw[4]]
 
-  const month = Number(m[1])
-  const day = Number(m[2])
-  if (month < 1 || month > 12 || day < 1 || day > 31) return null
+  const month = Number(raw[1] ?? raw[3])
+  const day = Number(raw[2] ?? raw[4])
+  if (month < 1 || month > 12) return { kind: 'invalid' }
 
   const year = Number(today.slice(0, 4))
-  const candidate = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
   // 錢不會花在未來。10/08 輸入 12/25 指的是去年的消費。
-  return candidate > today
-    ? `${year - 1}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
-    : candidate
+  // 閏年要看回推之後的年份：2/29 合不合法取決於落在哪一年。
+  const resolvedYear = toIso(year, month, day) > today ? year - 1 : year
+  return isValidYmd(resolvedYear, month, day)
+    ? { kind: 'date', iso: toIso(resolvedYear, month, day) }
+    : { kind: 'invalid' }
 }
 
 export function parseQuickInput(raw: string, opts: ParseOptions = {}): QuickInputParse {
@@ -108,10 +114,11 @@ export function parseQuickInput(raw: string, opts: ParseOptions = {}): QuickInpu
   const tokens = normalized.split(/\s+/)
   let cursor = 0
 
-  const prefixDate = parseDatePrefix(tokens[0]!, today)
   // 只有一個 token 時它是金額，不是日期：「1200」不該被讀成 12 月 00 日。
-  if (prefixDate && tokens.length > 1) {
-    base.date = prefixDate
+  const prefix = tokens.length > 1 ? parseDatePrefix(tokens[0]!, today) : null
+  if (prefix?.kind === 'invalid') return { ...base, blockingError: 'invalid_date' }
+  if (prefix?.kind === 'date') {
+    base.date = prefix.iso
     base.dateExplicit = true
     cursor = 1
   }
@@ -137,12 +144,17 @@ export function parseQuickInput(raw: string, opts: ParseOptions = {}): QuickInpu
   }
 
   const middle = base.merchant === null ? [] : tokens.slice(cursor + 1, amountIndex)
+  let trailing = tokens.slice(amountIndex + 1)
+  if (AMOUNT_UNIT.test(trailing[0] ?? '')) trailing = trailing.slice(1)
 
   // §4.3：中間的純數字 token 不得變成品項，移除並轉待確認。
   const kept = middle.filter((t) => parseNumberToken(t) === null)
   if (kept.length !== middle.length) pendingReasons.push('ambiguous_item_tokens')
 
-  base.items = kept.map((name) => ({ name }))
+  // amount 取的是最後一個數字 token，所以金額後面剩下的一定不是數字，不能默默丟掉。
+  if (trailing.length > 0) pendingReasons.push('tokens_after_amount')
+
+  base.items = [...kept, ...trailing].map((name) => ({ name }))
   base.pendingReasons = pendingReasons
   return base
 }

@@ -62,6 +62,13 @@ describe('左方 QR', () => {
     expect(result.kind).toBe('unknown')
     expect(result.reason).toContain('超出範圍')
   })
+
+  it('民國日期是不存在的日子（115 年 2/29）時判為不符規格', () => {
+    const result = classifyPayload(leftHeader({ roc: '1150229' }))
+
+    expect(result.kind).toBe('unknown')
+    expect(result.reason).toContain('超出範圍')
+  })
 })
 
 describe('右方 QR', () => {
@@ -101,6 +108,41 @@ describe('不符規格的 payload', () => {
 
 describe('parseEInvoicePayload', () => {
   const META = '自訂資料:2:2:0'
+
+  it('同一張照片有兩張不同發票的左方 QR → 整張不帶入，請使用者一次拍一張', () => {
+    const result = parseEInvoicePayload([
+      `${leftHeader({ invoiceNumber: 'AA12345678' })}:${META}:咖啡:1:55`,
+      `${leftHeader({ invoiceNumber: 'BB12345678' })}:${META}:麵包:1:30`,
+      '**:蛋糕:1:80',
+    ])
+
+    expect(result.items).toEqual([])
+    expect(result.invoiceNumber).toBeNull()
+    expect(result.totalAmount).toBeNull()
+    expect(result.confidence).toBe(0)
+    expect(result.notes.join()).toContain('請一次拍一張')
+    expect(result.notes.join()).toContain('AA12345678')
+    expect(result.notes.join()).toContain('BB12345678')
+  })
+
+  it('號碼相同但內容不同的兩個左方 QR 也拒絕，不重複併入品項', () => {
+    const result = parseEInvoicePayload([
+      `${leftHeader()}:${META}:咖啡:1:55`,
+      `${leftHeader()}:${META}:咖啡:1:55:麵包:1:30`,
+    ])
+
+    expect(result.items).toEqual([])
+    expect(result.confidence).toBe(0)
+  })
+
+  it('同一個 QR 被偵測到兩次（字串完全相同）→ 當成一個，正常解析', () => {
+    const text = `${leftHeader()}:${META}:咖啡:1:55`
+    const result = parseEInvoicePayload([text, text])
+
+    expect(result.invoiceNumber).toBe('AB12345678')
+    expect(result.items).toEqual([{ name: '咖啡', qty: 1, value: 55 }])
+    expect(result.kinds).toEqual(['left'])
+  })
 
   it('左右兩個 QR 的品項接起來，表頭欄位照帶', () => {
     const result = parseEInvoicePayload([`${leftHeader()}:${META}:咖啡:1:55`, '**:麵包:2:30'])

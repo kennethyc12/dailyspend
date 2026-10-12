@@ -105,7 +105,9 @@ export class IndexedDbAdapter implements StoragePort {
     try {
       result = await fn(new IdbTx(tx))
     } catch (e) {
-      // fn 自己失敗時主動 abort，避免半套寫入留在資料庫裡。
+      // request 失敗（例如撞 unique index）時 IndexedDB 會自己回滾；但 fn 拋出的是
+      // 非 request 錯誤時，transaction 會把已寫入的部分 commit 掉，只能靠這裡主動 abort。
+      // 拿掉它，「fn 中途拋錯時整個 transaction 回滾」的測試會變紅。
       try {
         tx.abort()
       } catch {
