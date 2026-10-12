@@ -128,9 +128,6 @@ export function classifyPayload(text: string): ClassifiedPayload {
  */
 const LEFT_META_SEGMENTS = 4
 
-/** 中文編碼參數：0 = UTF-8，1 = Big5。 */
-const ENCODING_LABEL: Record<string, string> = { '0': 'UTF-8', '1': 'Big5' }
-
 export interface RecognizedItem {
   name: string
   qty: number
@@ -222,11 +219,6 @@ export function parseEInvoicePayload(texts: string[]): RecognizedInvoice {
   for (const classified of all) {
     if (classified.kind === 'left' && classified.header) {
       header = classified.header
-
-      const encoding = classified.segments[3]
-      if (encoding !== undefined && ENCODING_LABEL[encoding] === 'Big5') {
-        notes.push('發票標示品項為 Big5 編碼，若出現亂碼請回報')
-      }
       items.push(
         ...parseTriplets(classified.segments.slice(LEFT_META_SEGMENTS), notes, '左方 QR '),
       )

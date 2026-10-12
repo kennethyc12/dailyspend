@@ -231,12 +231,11 @@ describe('實拍結構（號碼換成假值）', () => {
     expect(result.notes).toEqual([])
   })
 
-  // B0 移除依編碼參數產生的 note 後，這裡的 notes 改成 []。
-  it('實拍 A：單一品項照收，編碼參數 1 目前仍產生 Big5 note', () => {
+  it('實拍 A：單一品項照收，不依編碼參數產生任何 note', () => {
     const result = parseEInvoicePayload([REAL_A_LEFT, REAL_A_RIGHT])
 
     expect(result.items).toEqual([{ name: '<——>電影預售套票', qty: 1, value: 600 }])
-    expect(result.notes).toEqual(['發票標示品項為 Big5 編碼，若出現亂碼請回報'])
+    expect(result.notes).toEqual([])
   })
 })
 
