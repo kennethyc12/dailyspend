@@ -4,7 +4,7 @@ import type { Photo, SpendRecord } from '@/models/types'
 import { IndexedDbAdapter, seed } from '@/storage'
 import { seedBuiltinRules } from '@/services/ruleService'
 import { parseEInvoicePayload, type RecognizedInvoice } from '@/recognize/einvoicePayload'
-import { leftQr } from '@/test/fixtures'
+import { leftQr, REAL_B_LEFT, REAL_B_RIGHT } from '@/test/fixtures'
 import { createFromInvoice } from '../invoiceService'
 
 const NOW = Date.UTC(2026, 9, 11, 4, 0, 0)
@@ -212,6 +212,24 @@ describe('一張照片讀到多張發票', () => {
     expect(r.invoiceNumber).toBeNull()
     expect(r.status).toBe('pending')
     expect(r.pendingReasons).toContain('recognition_failed')
+  })
+})
+
+describe('實拍 B：單價帶小數', () => {
+  it('三個品項都存進去，不因解析失敗轉待確認；品項金額欄位維持 null', async () => {
+    const recognized = parseEInvoicePayload([REAL_B_LEFT, REAL_B_RIGHT])
+
+    const result = await createFromInvoice(storage, { recognized, merchant: '燒肉店', amount: null }, NOW)
+    expect(result.ok).toBe(true)
+
+    const r = await only()
+    expect(r.items.map((i) => [i.name, i.qty, i.unitPrice, i.amount])).toEqual([
+      ['炙燒明太子', 1, null, null],
+      ['蒜味美乃滋', 1, null, null],
+      ['炸雞翅', 1, null, null],
+    ])
+    expect(r.pendingReasons).not.toContain('recognition_failed')
+    expect(r.amount).toBe(840)
   })
 })
 

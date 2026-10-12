@@ -158,22 +158,26 @@ export interface RecognizedInvoice {
   confidence: number
 }
 
+// 規格沒說金額一定為正（回饋金是負的），實拍樣本的單價也有 370.0 這種小數。
+const NUMERIC = /^-?\d+(?:\.\d+)?$/
+
 function parseTriplets(
   segments: string[],
   notes: string[],
   source: string,
 ): RecognizedItem[] {
+  // 實拍樣本的左方 payload 以 `:` 結尾，split 後多一個空字串；只拿掉一個。
+  const usable = segments[segments.length - 1] === '' ? segments.slice(0, -1) : segments
   const items: RecognizedItem[] = []
 
-  for (let i = 0; i < segments.length; i += 3) {
-    const [name, qty, value] = [segments[i], segments[i + 1], segments[i + 2]]
+  for (let i = 0; i < usable.length; i += 3) {
+    const [name, qty, value] = [usable[i], usable[i + 1], usable[i + 2]]
     if (name === undefined || qty === undefined || value === undefined) {
-      notes.push(`${source}最後 ${segments.length - i} 個欄位湊不成「品名:數量:單價」，略過`)
+      notes.push(`${source}最後 ${usable.length - i} 個欄位湊不成「品名:數量:單價」，略過`)
       break
     }
-    // 規格沒說金額一定為正——回饋金就是負的，所以只要求是整數。
-    if (!/^-?\d+$/.test(qty) || !/^-?\d+$/.test(value)) {
-      notes.push(`${source}「${name}」的數量或單價不是整數（${qty} / ${value}），略過這筆`)
+    if (!NUMERIC.test(qty) || !NUMERIC.test(value)) {
+      notes.push(`${source}「${name}」的數量或單價不是數字（${qty} / ${value}），略過這筆`)
       continue
     }
     items.push({ name, qty: Number(qty), value: Number(value) })

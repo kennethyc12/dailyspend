@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { classifyPayload, LEFT_HEADER_LENGTH, parseEInvoicePayload } from '../einvoicePayload'
+import { REAL_A_LEFT, REAL_A_RIGHT, REAL_B_LEFT, REAL_B_RIGHT } from '@/test/fixtures'
 
 /**
  * 表頭欄位來自財政部規格（字軌 10 + 日期 7 + 隨機碼 4 + 銷售額 8 + 總計額 8 +
@@ -188,11 +189,11 @@ describe('parseEInvoicePayload', () => {
     expect(result.notes.join()).toContain('湊不成')
   })
 
-  it('數量或單價不是整數時略過該筆，其餘照收', () => {
+  it('數量或單價不是數字時略過該筆，其餘照收', () => {
     const result = parseEInvoicePayload([`${leftHeader()}:${META}:咖啡:一杯:55:麵包:2:30`])
 
     expect(result.items).toEqual([{ name: '麵包', qty: 2, value: 30 }])
-    expect(result.notes.join()).toContain('不是整數')
+    expect(result.notes.join()).toContain('不是數字')
   })
 
   it('只有填充星號的右方 QR 不產生品項', () => {
@@ -206,3 +207,73 @@ describe('parseEInvoicePayload', () => {
     expect(parseEInvoicePayload([]).confidence).toBe(0)
   })
 })
+
+describe('實拍結構（號碼換成假值）', () => {
+  it('兩個常數的表頭都切得出預期的欄位', () => {
+    expect(classifyPayload(REAL_A_LEFT)).toMatchObject({
+      kind: 'left',
+      header: { invoiceNumber: 'ZZ00000001', date: '2025-09-03', totalAmount: 600 },
+    })
+    expect(classifyPayload(REAL_B_LEFT)).toMatchObject({
+      kind: 'left',
+      header: { invoiceNumber: 'ZZ00000002', date: '2025-12-30', totalAmount: 840 },
+    })
+  })
+
+  it('實拍 B：小數單價、左方結尾的 `:`、右方 `**` 後沒接 `:`，三個品項都收進來', () => {
+    const result = parseEInvoicePayload([REAL_B_LEFT, REAL_B_RIGHT])
+
+    expect(result.items).toEqual([
+      { name: '炙燒明太子', qty: 1, value: 370 },
+      { name: '蒜味美乃滋', qty: 1, value: 280 },
+      { name: '炸雞翅', qty: 1, value: 190 },
+    ])
+    expect(result.notes).toEqual([])
+  })
+
+  // B0 移除依編碼參數產生的 note 後，這裡的 notes 改成 []。
+  it('實拍 A：單一品項照收，編碼參數 1 目前仍產生 Big5 note', () => {
+    const result = parseEInvoicePayload([REAL_A_LEFT, REAL_A_RIGHT])
+
+    expect(result.items).toEqual([{ name: '<——>電影預售套票', qty: 1, value: 600 }])
+    expect(result.notes).toEqual(['發票標示品項為 Big5 編碼，若出現亂碼請回報'])
+  })
+})
+
+describe('品項三元組的數字與結尾', () => {
+  const META = '自訂資料:2:2:0'
+  const left = (tail: string) => parseEInvoicePayload([`${leftHeader()}:${META}:${tail}`])
+
+  it('單價帶小數照收，不四捨五入', () => {
+    expect(left('炙燒明太子:1:370.0').items).toEqual([{ name: '炙燒明太子', qty: 1, value: 370 }])
+    expect(left('折扣:1:-10.0').items).toEqual([{ name: '折扣', qty: 1, value: -10 }])
+  })
+
+  it('數量帶小數照收（秤重商品）', () => {
+    expect(left('咖啡豆:0.5:12.5').items).toEqual([{ name: '咖啡豆', qty: 0.5, value: 12.5 }])
+  })
+
+  it('小數點一邊沒有數字時仍然略過', () => {
+    expect(left('咖啡:1:55.').items).toEqual([])
+    expect(left('咖啡:1:.5').items).toEqual([])
+  })
+
+  it('左方結尾多一個 `:` 不產生「湊不成」note', () => {
+    const result = left('咖啡:1:55:')
+    expect(result.items).toEqual([{ name: '咖啡', qty: 1, value: 55 }])
+    expect(result.notes).toEqual([])
+  })
+
+  it('右方結尾多一個 `:` 也不產生 note', () => {
+    const result = parseEInvoicePayload([`${leftHeader()}:${META}`, '**:咖啡:1:55:'])
+    expect(result.items).toEqual([{ name: '咖啡', qty: 1, value: 55 }])
+    expect(result.notes).toEqual([])
+  })
+
+  it('結尾兩個 `:` 只拿掉一個，剩下的仍然留 note', () => {
+    const result = left('咖啡:1:55::')
+    expect(result.items).toEqual([{ name: '咖啡', qty: 1, value: 55 }])
+    expect(result.notes.join()).toContain('湊不成')
+  })
+})
+
