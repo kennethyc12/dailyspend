@@ -6,7 +6,7 @@ import QuickInputView from '@/views/QuickInputView.vue'
 import { compressPhoto } from '@/photo/compress'
 import { detectQrCodes, type DetectResult } from '@/recognize/qrDetect'
 import { leftQr, photoFromFile } from '@/test/fixtures'
-import { button, mountView, pickFile, settled, useViewTest, waitForText } from '@/test/mountView'
+import { button, field, mountView, pickFile, settled, useViewTest, waitForText } from '@/test/mountView'
 
 vi.mock('@/recognize/qrDetect', () => ({
   detectQrCodes: vi.fn(),
@@ -102,3 +102,27 @@ describe('記一筆：發票照片', () => {
     expect(['a.jpg/AA12345678', 'b.jpg/BB12345678']).toContain(pair)
   })
 })
+
+describe('記一筆：發票總計額記成 0', () => {
+  it('不顯示 $0、提供金額欄位，存檔用使用者輸入的金額', async () => {
+    vi.mocked(compressPhoto).mockImplementation(async (f) => photoFromFile(f))
+    vi.mocked(detectQrCodes).mockResolvedValue(detected(leftQr({ invoiceNumber: 'ZZ00000003', total: 0 })))
+
+    const wrapper = await mountView(QuickInputView)
+    await settled(wrapper)
+    await pickFile(albumInput(wrapper), file('a.jpg'))
+    await waitForText(wrapper, 'ZZ00000003')
+    await settled(wrapper)
+
+    // 畫面層：沒有「發票總計額 $0」，改成讓使用者輸入
+    expect(wrapper.text()).not.toContain('發票總計額')
+    await field(wrapper, '金額').setValue('120')
+    await button(wrapper, '用發票資料存檔').trigger('click')
+    await settled(wrapper)
+
+    // 資料層：存的是使用者輸入的 120，不是 0
+    const [record] = await storage().getAll<SpendRecord>('records')
+    expect(record!.amount).toBe(120)
+  })
+})
+

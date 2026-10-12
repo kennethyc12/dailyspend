@@ -242,11 +242,18 @@ export function parseEInvoicePayload(texts: string[]): RecognizedInvoice {
 
   const confidence = header ? (items.length > 0 ? 1 : 0.8) : items.length > 0 ? 0.5 : 0
 
+  // 規格不允許零元發票，表頭總計額是 0 代表沒有記載（境外電商就是這樣），不是真的 0 元。見 design.md §5.3。
+  let totalAmount = header?.totalAmount ?? null
+  if (totalAmount === 0) {
+    notes.push('QR 的總計額記成 0，表示沒有記載金額（境外電商的發票會這樣），請自己填金額')
+    totalAmount = null
+  }
+
   return {
     invoiceNumber: header?.invoiceNumber ?? null,
     date: header?.date ?? null,
     randomCode: header?.randomCode ?? null,
-    totalAmount: header?.totalAmount ?? null,
+    totalAmount,
     salesAmount: header?.salesAmount ?? null,
     items,
     kinds,

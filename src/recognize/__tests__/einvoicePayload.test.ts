@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { classifyPayload, LEFT_HEADER_LENGTH, parseEInvoicePayload } from '../einvoicePayload'
-import { REAL_A_LEFT, REAL_A_RIGHT, REAL_B_LEFT, REAL_B_RIGHT } from '@/test/fixtures'
+import { leftQr, REAL_A_LEFT, REAL_A_RIGHT, REAL_B_LEFT, REAL_B_RIGHT } from '@/test/fixtures'
 
 /**
  * 表頭欄位來自財政部規格（字軌 10 + 日期 7 + 隨機碼 4 + 銷售額 8 + 總計額 8 +
@@ -273,6 +273,25 @@ describe('品項三元組的數字與結尾', () => {
     const result = left('咖啡:1:55::')
     expect(result.items).toEqual([{ name: '咖啡', qty: 1, value: 55 }])
     expect(result.notes.join()).toContain('湊不成')
+  })
+})
+
+describe('表頭總計額是 0', () => {
+  it('視為沒有記載金額：totalAmount 為 null 並說明原因，salesAmount 照原樣', () => {
+    const result = parseEInvoicePayload([leftQr({ total: 0 })])
+
+    expect(result.totalAmount).toBeNull()
+    expect(result.salesAmount).toBe(0)
+    expect(result.notes).toEqual([
+      'QR 的總計額記成 0，表示沒有記載金額（境外電商的發票會這樣），請自己填金額',
+    ])
+  })
+
+  it('總計額不是 0 時照原樣回傳，不產生 note', () => {
+    const result = parseEInvoicePayload([leftQr({ total: 55 })])
+
+    expect(result.totalAmount).toBe(55)
+    expect(result.notes).toEqual([])
   })
 })
 
