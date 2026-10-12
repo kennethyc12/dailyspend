@@ -1,0 +1,104 @@
+// @vitest-environment jsdom
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type { DOMWrapper } from '@vue/test-utils'
+import type { SpendRecord } from '@/models/types'
+import QuickInputView from '@/views/QuickInputView.vue'
+import { compressPhoto } from '@/photo/compress'
+import { detectQrCodes, type DetectResult } from '@/recognize/qrDetect'
+import { leftQr, photoFromFile } from '@/test/fixtures'
+import { button, mountView, pickFile, settled, useViewTest, waitForText } from '@/test/mountView'
+
+vi.mock('@/recognize/qrDetect', () => ({
+  detectQrCodes: vi.fn(),
+  warmUp: vi.fn(async () => 0),
+}))
+
+vi.mock('@/photo/compress', () => ({
+  compressPhoto: vi.fn(),
+}))
+
+const { storage } = useViewTest()
+
+beforeEach(() => {
+  vi.mocked(detectQrCodes).mockReset()
+  vi.mocked(compressPhoto).mockReset()
+})
+
+function detected(...texts: string[]): DetectResult {
+  return { codes: texts.map((text) => ({ text, bytes: new Uint8Array(), rotation: 0 })), ms: 1, error: null }
+}
+
+function albumInput(wrapper: Awaited<ReturnType<typeof mountView>>): DOMWrapper<HTMLInputElement> {
+  return wrapper.findAll<HTMLInputElement>('input[type="file"]').find((i) => !i.attributes('capture'))!
+}
+
+function file(name: string): File {
+  return new File([name], name, { type: 'image/jpeg' })
+}
+
+describe('記一筆：文字輸入', () => {
+  it('輸入「全家 咖啡 55」按存檔 → 存進一筆並顯示結果', async () => {
+    const wrapper = await mountView(QuickInputView)
+    await settled(wrapper)
+
+    await wrapper.find('input.entry').setValue('全家 咖啡 55')
+    await button(wrapper, '存檔').trigger('click')
+    await settled(wrapper)
+
+    const records = await storage().getAll<SpendRecord>('records')
+    expect(records).toHaveLength(1)
+    expect(records[0]).toMatchObject({ merchant: '全家', amount: 55, sourceType: 'manual' })
+    expect(wrapper.text()).toContain('已存：全家')
+  })
+})
+
+describe('記一筆：發票照片', () => {
+  it.fails('#4 文字框有字時讀到發票，按「存檔」不會丟掉 QR 讀到的發票資料', async () => {
+    vi.mocked(compressPhoto).mockImplementation(async (f) => photoFromFile(f))
+    vi.mocked(detectQrCodes).mockResolvedValue(detected(leftQr({ invoiceNumber: 'AB12345678' })))
+
+    const wrapper = await mountView(QuickInputView)
+    await settled(wrapper)
+    await wrapper.find('input.entry').setValue('全家 咖啡 55')
+    await pickFile(albumInput(wrapper), file('a.jpg'))
+    await waitForText(wrapper, 'AB12345678')
+    await settled(wrapper)
+
+    await button(wrapper, '存檔').trigger('click')
+    await settled(wrapper)
+
+    // 資料層：不能存成一筆丟了發票號碼的手打紀錄
+    const records = await storage().getAll<SpendRecord>('records')
+    expect(records.filter((r) => r.invoiceNumber === null)).toEqual([])
+    // 畫面層：發票面板還在
+    expect(wrapper.text()).toContain('AB12345678')
+  })
+
+  // B3 修好後，讀取中的拍照 input 會被 disable，VTU 對 disabled 元素的 trigger 不會有反應，
+  // B 根本選不進去，結果變成 A 照片配 A 發票、測試轉綠——這是正確行為，不是測試寫錯。
+  it.fails('#12a 讀 A 照片的 QR 時換成 B 照片，存下來的照片和發票資料屬於同一張', async () => {
+    vi.mocked(compressPhoto).mockImplementation(async (f) => photoFromFile(f))
+    let resolveA!: (r: DetectResult) => void
+    vi.mocked(detectQrCodes)
+      .mockImplementationOnce(() => new Promise<DetectResult>((r) => (resolveA = r)))
+      .mockResolvedValueOnce(detected(leftQr({ invoiceNumber: 'BB12345678' })))
+
+    const wrapper = await mountView(QuickInputView)
+    await settled(wrapper)
+
+    await pickFile(albumInput(wrapper), file('a.jpg'))
+    await vi.waitFor(() => expect(detectQrCodes).toHaveBeenCalledTimes(1))
+    await pickFile(albumInput(wrapper), file('b.jpg'))
+    await vi.waitFor(() => expect(wrapper.text()).not.toContain('照片處理中'))
+    resolveA(detected(leftQr({ invoiceNumber: 'AA12345678' })))
+    await waitForText(wrapper, '用發票資料存檔')
+    await settled(wrapper)
+
+    await button(wrapper, '用發票資料存檔').trigger('click')
+    await settled(wrapper)
+
+    const [record] = await storage().getAll<SpendRecord>('records')
+    const pair = `${record!.photoId}/${record!.invoiceNumber}`
+    expect(['a.jpg/AA12345678', 'b.jpg/BB12345678']).toContain(pair)
+  })
+})
