@@ -253,6 +253,75 @@ describe('同類重複購買', () => {
     expect(f.estimated).toBe(false)
     expect(f.detail).toContain('$120')
   })
+
+  const amountItem = (name: string, amount: number) => ({ ...item(name), amount })
+
+  /** 載具形狀：每個品項都有金額，紀錄金額 = 各列加總（含折扣）。 */
+  function carrierRec(date: string, items: [name: string, amount: number][]) {
+    return rec({
+      date,
+      amount: items.reduce((s, [, a]) => s + a, 0),
+      items: items.map(([n, a]) => amountItem(n, a)),
+    })
+  }
+
+  const DAYS = ['2026-10-20', '2026-10-19', '2026-10-18']
+
+  function repeatRun(records: SpendRecord[]) {
+    const r = run([...records, ...filler(4, '2026-10-15')])
+    return {
+      ran: !r.insufficient.some((i) => i.kind === 'repeatPurchase'),
+      find: (name: string) =>
+        r.findings.find((x) => x.kind === 'repeatPurchase' && x.title.startsWith(`${name}：`)),
+    }
+  }
+
+  it('負數品項（回饋金）不構成重複購買', () => {
+    const r = repeatRun(DAYS.map((d) => carrierRec(d, [['咖啡', 100], ['會員回饋金', -90]])))
+    expect(r.ran).toBe(true)
+    expect(r.find('會員回饋金')).toBeUndefined()
+  })
+
+  it('0 元品項（套餐附餐）不構成重複購買', () => {
+    const r = repeatRun(DAYS.map((d) => carrierRec(d, [['套餐', 99], ['可樂', 0]])))
+    expect(r.ran).toBe(true)
+    expect(r.find('可樂')).toBeUndefined()
+  })
+
+  it('同一筆紀錄的同名列只算一次購買', () => {
+    const r = repeatRun([
+      carrierRec('2026-10-20', [
+        ['洗衣精', 369],
+        ['洗衣精', 369],
+        ['洗衣精', 369],
+      ]),
+    ])
+    expect(r.ran).toBe(true)
+    expect(r.find('洗衣精')).toBeUndefined()
+  })
+
+  it('次數以紀錄計，金額加總所有列', () => {
+    const r = repeatRun(
+      DAYS.map((d) =>
+        carrierRec(d, [
+          ['洗衣精', 369],
+          ['洗衣精', 369],
+        ]),
+      ),
+    )
+    const f = r.find('洗衣精')
+    expect(f).toBeDefined()
+    expect(f!.title).toContain('3 次')
+    expect(f!.detail).toContain('$2214')
+  })
+
+  it('排除折扣列不會連帶跳過同一筆紀錄的其他品項', () => {
+    const r = repeatRun(DAYS.map((d) => carrierRec(d, [['會員回饋金', -90], ['洗衣精', 369]])))
+    const f = r.find('洗衣精')
+    expect(f).toBeDefined()
+    expect(f!.title).toContain('3 次')
+    expect(f!.detail).toContain('$1107')
+  })
 })
 
 describe('§8.4 冷啟動', () => {

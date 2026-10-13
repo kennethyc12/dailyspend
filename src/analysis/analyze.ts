@@ -295,7 +295,8 @@ function repeatPurchase(
 
   interface Hit {
     label: string
-    recordIds: string[]
+    /** 以紀錄計次：同一張發票的同名列（一次買好幾包）只算一次購物。 */
+    recordIds: Set<string>
     total: number
     estimated: boolean
   }
@@ -305,11 +306,13 @@ function repeatPurchase(
     for (const item of r.items) {
       const key = norm(item.name)
       if (!key) continue
+      // 有金額且 ≤ 0 的是折扣、回饋金或套餐附餐，不是一次購買。
+      if (item.amount !== null && item.amount <= 0) continue
       // v1 手輸沒有單品金額，用單據總額平均分攤。這是估算，僅供排序，
       // 所以標記 estimated，UI 顯示「約」。
       const share = item.amount ?? Math.round(r.amount / r.items.length)
-      const hit = hits.get(key) ?? { label: item.name, recordIds: [], total: 0, estimated: false }
-      hit.recordIds.push(r.id)
+      const hit = hits.get(key) ?? { label: item.name, recordIds: new Set(), total: 0, estimated: false }
+      hit.recordIds.add(r.id)
       hit.total += share
       hit.estimated ||= item.amount === null
       hits.set(key, hit)
@@ -318,14 +321,14 @@ function repeatPurchase(
 
   const findings: Finding[] = []
   for (const hit of hits.values()) {
-    if (hit.recordIds.length < t.minRepeat) continue
+    if (hit.recordIds.size < t.minRepeat) continue
     findings.push({
       kind: 'repeatPurchase',
-      title: `${hit.label}：${t.windowDays} 天內買了 ${hit.recordIds.length} 次`,
+      title: `${hit.label}：${t.windowDays} 天內買了 ${hit.recordIds.size} 次`,
       detail: `合計${hit.estimated ? '約' : ''} $${hit.total}（${w.from} ～ ${w.to}）`,
       monthlyEquivalent: perMonth(hit.total, w.days),
       estimated: hit.estimated,
-      evidence: { recordIds: [...new Set(hit.recordIds)], itemNames: [hit.label] },
+      evidence: { recordIds: [...hit.recordIds], itemNames: [hit.label] },
     })
   }
 
