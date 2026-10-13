@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isValidYmd } from '../dates'
+import { isValidIsoDate, isValidYmd } from '../dates'
 
 describe('isValidYmd', () => {
   it('依真實的月份天數判斷', () => {
@@ -22,3 +22,13 @@ describe('isValidYmd', () => {
     expect(isValidYmd(2026, 1.5, 1)).toBe(false)
   })
 })
+
+describe('isValidIsoDate', () => {
+  it('格式是 YYYY-MM-DD 而且日子存在', () => {
+    expect(isValidIsoDate('2026-02-28')).toBe(true)
+    expect(isValidIsoDate('2026-02-30')).toBe(false)
+    expect(isValidIsoDate('2026/02/28')).toBe(false)
+    expect(isValidIsoDate('')).toBe(false)
+  })
+})
+

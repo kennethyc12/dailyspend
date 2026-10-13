@@ -500,7 +500,7 @@ iPhone 拍的照片方向放在 EXIF 裡，不套用存進去的圖會是躺著�
   → compressPhoto()
   → detectQrCodes()            zxing-wasm，一次解到左右兩碼
   → parseEInvoicePayload()     合併左右 payload，拆表頭與品項
-  → 畫面顯示讀到什麼，使用者補店家（與金額）
+  → 畫面顯示讀到什麼，使用者補店家（與金額；沒有表頭時還有日期）
   → createFromInvoice()        分類 → saveRecord（去重、合併）
 ```
 
@@ -533,6 +533,10 @@ iPhone 拍的照片方向放在 EXIF 裡，不套用存進去的圖會是躺著�
 `parseEInvoicePayload()` 把它當成 `null` 並留一則 note，由使用者輸入金額。只看
 總計額、不看編碼參數（參數不可靠，見 §5.3.1）；`salesAmount` 允許記 `0`，不比照；
 /qr-lab 讀的是 `LeftHeader`，照原樣顯示 `0`。
+
+**沒有表頭時日期由使用者填**（2026-10-13，B3b #5）：不再預設今天。有表頭時以 QR 的
+日期為準、忽略使用者輸入，因為它決定 `invoiceKey`。日期驗證和編輯頁共用
+`isValidIsoDate()`（`src/analysis/dates.ts`）。
 
 **wasm 在進入記一筆頁時先暖機**：冷啟動載入約 1 秒（實機實測），不先暖好的話
 會剛好撞在使用者按下拍照之後。

@@ -6,7 +6,7 @@ import { planCorrection, type CorrectionPlan, type CorrectionScope } from '@/cla
 import { applyCorrection, loadActiveRules, recordHits } from './ruleService'
 import { prepareRecord, saveRecord, type SaveOutcome } from './recordService'
 import type { Settings } from '@/models/types'
-import { isValidYmd, parseIso } from '@/analysis/dates'
+import { ISO_DATE, isValidYmd, parseIso } from '@/analysis/dates'
 
 /** 歷史店家 + 內建 merchant 規則，用來標記 merchantMatched。 */
 export async function merchantDictionary(storage: StoragePort): Promise<string[]> {
@@ -212,8 +212,6 @@ export interface RecordPatch {
   itemNames?: string[]
   note?: string
 }
-
-const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/
 
 /**
  * 編輯既有紀錄。分類來源是 `user` 時不會被重跑的規則蓋掉——

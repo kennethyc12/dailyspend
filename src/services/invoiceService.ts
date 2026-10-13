@@ -1,7 +1,7 @@
 import type { PendingReason, Photo, RecordItem, SpendRecord } from '@/models/types'
 import type { StoragePort } from '@/storage'
 import type { RecognizedInvoice } from '@/recognize/einvoicePayload'
-import { todayIso } from '@/parsing/quickInput'
+import { isValidIsoDate } from '@/analysis/dates'
 import { classify } from './entryService'
 import { recordHits } from './ruleService'
 import { saveRecord, type SaveOutcome } from './recordService'
@@ -12,11 +12,15 @@ export interface InvoiceEntryInput {
   merchant: string
   /** QR 沒有總計額時由使用者輸入；有總計額時這裡傳 null 代表採信發票。 */
   amount: number | null
+  /** QR 沒有表頭時由使用者填；有表頭時忽略，以 QR 的日期為準（它決定 invoiceKey）。 */
+  date?: string | null
   photo?: Photo
 }
 
+export type InvoiceBlocked = 'amount_missing' | 'amount_invalid' | 'date_missing' | 'date_invalid'
+
 export type InvoiceEntryResult =
-  | { ok: false; blocked: 'amount_missing' | 'amount_invalid' }
+  | { ok: false; blocked: InvoiceBlocked }
   | { ok: true; save: SaveOutcome; usedInvoiceAmount: boolean }
 
 /**
@@ -35,6 +39,11 @@ export async function createFromInvoice(
   const amount = recognized.totalAmount ?? input.amount
   if (amount === null) return { ok: false, blocked: 'amount_missing' }
   if (!Number.isInteger(amount) || amount < 0) return { ok: false, blocked: 'amount_invalid' }
+
+  // 沒有表頭時不再預設今天：日期是使用者要照發票填的資料
+  const date = recognized.date ?? input.date ?? null
+  if (date === null || date === '') return { ok: false, blocked: 'date_missing' }
+  if (!isValidIsoDate(date)) return { ok: false, blocked: 'date_invalid' }
 
   const merchant = input.merchant.trim()
   const classified = await classify(storage, {
@@ -66,7 +75,7 @@ export async function createFromInvoice(
 
   const record: SpendRecord = {
     id: crypto.randomUUID(),
-    date: recognized.date ?? todayIso(new Date(now)),
+    date,
     merchant,
     amount,
     items,

@@ -168,13 +168,47 @@ describe('從發票存檔', () => {
         recognized: recognized({ invoiceNumber: null, date: null, totalAmount: null }),
         merchant: '康是美',
         amount: 100,
+        date: '2026-09-01',
       },
       NOW,
     )
 
     const r = await only()
     expect(r.invoiceKey).toBeNull()
-    expect(r.date).toBe('2026-10-11')
+    expect(r.date).toBe('2026-09-01')
+  })
+
+  it('沒有表頭又沒填日期時擋下，不再預設今天、不寫入', async () => {
+    const result = await createFromInvoice(
+      storage,
+      { recognized: recognized({ invoiceNumber: null, date: null, totalAmount: null }), merchant: '康是美', amount: 100 },
+      NOW,
+    )
+
+    expect(result).toEqual({ ok: false, blocked: 'date_missing' })
+    expect(await storage.count('records')).toBe(0)
+  })
+
+  it('沒有表頭時填了不存在的日期 → date_invalid', async () => {
+    const result = await createFromInvoice(
+      storage,
+      {
+        recognized: recognized({ invoiceNumber: null, date: null, totalAmount: null }),
+        merchant: '康是美',
+        amount: 100,
+        date: '2026-02-30',
+      },
+      NOW,
+    )
+
+    expect(result).toEqual({ ok: false, blocked: 'date_invalid' })
+    expect(await storage.count('records')).toBe(0)
+  })
+
+  it('有表頭時以 QR 的日期為準，忽略使用者傳入的日期（它決定 invoiceKey）', async () => {
+    await createFromInvoice(storage, { recognized: recognized(), merchant: '全家', amount: null, date: '2026-01-01' }, NOW)
+
+    expect((await only()).date).toBe('2026-10-11')
   })
 
   it('負數金額的品項照收（回饋金）', async () => {
@@ -204,7 +238,11 @@ describe('一張照片讀到多張發票', () => {
       leftQr({ invoiceNumber: 'BB12345678' }),
     ])
 
-    const result = await createFromInvoice(storage, { recognized: rejected, merchant: '全家', amount: 120 }, NOW)
+    const result = await createFromInvoice(
+      storage,
+      { recognized: rejected, merchant: '全家', amount: 120, date: '2026-10-11' },
+      NOW,
+    )
     expect(result.ok).toBe(true)
 
     const r = await only()

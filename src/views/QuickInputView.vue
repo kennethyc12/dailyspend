@@ -6,7 +6,7 @@ import { categoryName, refreshRecords, useRecords } from '@/composables/useRecor
 import { initStorage, useStorageStatus } from '@/composables/useStorageStatus'
 import { usePhotoPicker } from '@/composables/usePhotoPicker'
 import { saveSample } from '@/services/sampleService'
-import { createFromInvoice } from '@/services/invoiceService'
+import { createFromInvoice, type InvoiceBlocked } from '@/services/invoiceService'
 import { detectQrCodes, warmUp } from '@/recognize/qrDetect'
 import { parseEInvoicePayload, type RecognizedInvoice } from '@/recognize/einvoicePayload'
 import { todayIso } from '@/parsing/quickInput'
@@ -25,16 +25,22 @@ const lastWasPending = ref(false)
 const lastWasMerged = ref(false)
 const sampleMsg = ref<string | null>(null)
 
+// 只放有可用資料的發票（confidence > 0）；有值時文字框隱藏，只留發票這條存檔路徑（D1）
 const invoice = shallowRef<RecognizedInvoice | null>(null)
+const readMsg = shallowRef<string[]>([])
 const reading = ref(false)
 const invoiceMerchant = ref('')
 const invoiceAmount = ref('')
+const invoiceDate = ref('')
 
 const invoiceTotal = computed(() => invoice.value?.totalAmount ?? null)
 const invoiceItemCount = computed(() => invoice.value?.items.length ?? 0)
+const hasHeader = computed(() => invoice.value?.date != null)
 const canSaveInvoice = computed(() => {
   if (!invoice.value || saving.value) return false
-  return invoiceTotal.value !== null || /^\d+$/.test(invoiceAmount.value.trim())
+  const amountOk = invoiceTotal.value !== null || /^\d+$/.test(invoiceAmount.value.trim())
+  const dateOk = hasHeader.value || invoiceDate.value !== ''
+  return amountOk && dateOk
 })
 
 const today = todayIso()
@@ -55,8 +61,15 @@ const BLOCKED_MESSAGE = {
   invalid_date: '日期不存在，例如 2/30。請改成正確的日期，或拿掉日期（預設今天）',
 } as const
 
+const INVOICE_BLOCKED_MESSAGE: Record<InvoiceBlocked, string> = {
+  amount_missing: '這張發票沒有總計額，請自己填金額',
+  amount_invalid: '金額必須是非負整數',
+  date_missing: '請填發票日期',
+  date_invalid: '發票日期不存在',
+}
+
 async function submit() {
-  if (saving.value) return
+  if (saving.value || reading.value || picker.working.value) return
   saving.value = true
   errorMsg.value = null
   sampleMsg.value = null
@@ -84,8 +97,10 @@ async function submit() {
 
 function clearInvoice() {
   invoice.value = null
+  readMsg.value = []
   invoiceMerchant.value = ''
   invoiceAmount.value = ''
+  invoiceDate.value = ''
 }
 
 function dropPhoto() {
@@ -103,10 +118,23 @@ async function onPickPhoto(event: Event) {
   sampleMsg.value = null
   try {
     const detected = await detectQrCodes(photo.blob)
-    if (detected.codes.length === 0) return
-    invoice.value = parseEInvoicePayload(detected.codes.map((c) => c.text))
+    if (detected.error) {
+      readMsg.value = [`讀取發票失敗：${detected.error}`]
+      return
+    }
+    if (detected.codes.length === 0) {
+      readMsg.value = ['讀不到 QR，請手動輸入']
+      return
+    }
+    const parsed = parseEInvoicePayload(detected.codes.map((c) => c.text))
+    // 沒有表頭也沒有品項（例如多張發票被拒絕）：沒有可用的發票資料，照常走文字框
+    if (parsed.confidence === 0) {
+      readMsg.value = parsed.notes.length ? parsed.notes : ['讀不到 QR，請手動輸入']
+      return
+    }
+    invoice.value = parsed
   } catch (err) {
-    errorMsg.value = `讀取發票失敗：${(err as Error).message}`
+    readMsg.value = [`讀取發票失敗：${(err as Error).message}`]
   } finally {
     reading.value = false
   }
@@ -126,16 +154,14 @@ async function submitInvoice() {
         recognized: invoice.value,
         merchant: invoiceMerchant.value,
         amount: typed === '' ? null : Number(typed),
+        date: invoiceDate.value,
         photo: picker.photo.value ?? undefined,
       },
       Date.now(),
     )
 
     if (!result.ok) {
-      errorMsg.value =
-        result.blocked === 'amount_missing'
-          ? '這張發票沒有總計額，請自己填金額'
-          : '金額必須是非負整數'
+      errorMsg.value = INVOICE_BLOCKED_MESSAGE[result.blocked]
       return
     }
 
@@ -177,7 +203,7 @@ async function submitSample() {
   <main class="page">
     <h1>記一筆</h1>
 
-    <form @submit.prevent="submit">
+    <form v-if="!invoice" @submit.prevent="submit">
       <input
         v-model="text"
         class="entry"
@@ -190,115 +216,129 @@ async function submitSample() {
         :disabled="saving || state !== 'ready'"
       />
       <p class="hint">格式：店家 品項 金額。日期預設今天，可用「昨天」或「10/3」開頭。</p>
+    </form>
 
-      <div class="photo-pick">
-        <p class="pick-state">
-          <span v-if="picker.working.value">照片處理中…</span>
-          <span v-else-if="picker.photo.value">已附照片，可重新選擇</span>
-          <span v-else>附上發票照片（選填）</span>
-        </p>
-        <div class="pick-actions" :class="{ off: saving || picker.working.value }">
-          <label class="btn-text">
-            📷 拍照
-            <input
-              type="file"
-              accept="image/*"
-              capture="environment"
-              :disabled="saving || picker.working.value"
-              @change="onPickPhoto"
-            />
-          </label>
-          <label class="btn-text">
-            🖼 從相簿選
-            <input
-              type="file"
-              accept="image/*"
-              :disabled="saving || picker.working.value"
-              @change="onPickPhoto"
-            />
-          </label>
-        </div>
-      </div>
-
-      <div v-if="picker.previewUrl.value" class="preview">
-        <img :src="picker.previewUrl.value" alt="發票照片預覽" />
-        <div class="preview-actions">
-          <button type="button" class="btn-text" @click="dropPhoto">移除照片</button>
-          <button type="button" class="btn-text" :disabled="saving" @click="submitSample">
-            只存成樣本（不記帳）
-          </button>
-        </div>
-      </div>
-
-      <p v-if="picker.error.value" class="result warn">{{ picker.error.value }}</p>
-      <p v-if="reading" class="hint">讀取發票 QR…</p>
-
-      <section v-if="invoice" class="panel invoice">
-        <h2>從發票讀到 {{ invoiceItemCount }} 個品項</h2>
-
-        <ul v-if="invoiceItemCount" class="list">
-          <li v-for="(item, i) in invoice.items" :key="`${item.name}-${i}`">
-            <div class="row">
-              <span>{{ item.name }}</span>
-              <span class="amount">{{ item.qty }} × {{ item.value }}</span>
-            </div>
-          </li>
-        </ul>
-        <p v-else class="hint">這張發票的 QR 裡沒有品項。</p>
-
-        <p v-if="invoice.invoiceNumber" class="sub">
-          {{ invoice.invoiceNumber }} · {{ invoice.date }}
-        </p>
-
-        <label class="field">
-          <span>店家</span>
+    <div class="photo-pick">
+      <p class="pick-state">
+        <span v-if="picker.working.value">照片處理中…</span>
+        <span v-else-if="picker.photo.value">已附照片，可重新選擇</span>
+        <span v-else>附上發票照片（選填）</span>
+      </p>
+      <div class="pick-actions" :class="{ off: saving || reading || picker.working.value }">
+        <label class="btn-text">
+          📷 拍照
           <input
-            v-model="invoiceMerchant"
-            type="text"
-            placeholder="發票上沒有店家名稱，請自己填"
-            autocomplete="off"
-            :disabled="saving"
+            type="file"
+            accept="image/*"
+            capture="environment"
+            :disabled="saving || reading || picker.working.value"
+            @change="onPickPhoto"
           />
         </label>
-
-        <p v-if="invoiceTotal !== null" class="sub">
-          發票總計額 <strong>${{ invoiceTotal }}</strong>，存檔時以它為準。
-        </p>
-        <label v-else class="field">
-          <span>金額</span>
+        <label class="btn-text">
+          🖼 從相簿選
           <input
-            v-model="invoiceAmount"
-            type="text"
-            inputmode="numeric"
-            placeholder="發票沒有總計額，請自己填"
-            :disabled="saving"
+            type="file"
+            accept="image/*"
+            :disabled="saving || reading || picker.working.value"
+            @change="onPickPhoto"
           />
         </label>
+      </div>
+    </div>
 
-        <!-- 品項那欄的「單價」語意未定，所以不幫忙加總；寧可讓人自己看發票。 -->
-        <p v-if="invoiceTotal === null && invoiceItemCount" class="hint">
-          上面的「數量 × 數字」直接來自發票，但規格沒說清楚那是單價還是小計，
-          所以不替你加總。
-        </p>
-
-        <ul v-if="invoice.notes.length" class="list notes">
-          <li v-for="note in invoice.notes" :key="note" class="sub warn">{{ note }}</li>
-        </ul>
-
-        <button
-          type="button"
-          class="btn-primary"
-          :disabled="!canSaveInvoice"
-          @click="submitInvoice"
-        >
-          {{ saving ? '存檔中…' : '用發票資料存檔' }}
+    <div v-if="picker.previewUrl.value" class="preview">
+      <img :src="picker.previewUrl.value" alt="發票照片預覽" />
+      <div class="preview-actions">
+        <button type="button" class="btn-text" :disabled="saving || reading" @click="dropPhoto">
+          移除照片
         </button>
-      </section>
+        <button type="button" class="btn-text" :disabled="saving || reading" @click="submitSample">
+          只存成樣本（不記帳）
+        </button>
+      </div>
+    </div>
 
-      <button class="btn-primary" type="submit" :disabled="saving || state !== 'ready' || !text.trim()">
-        {{ saving ? '存檔中…' : state !== 'ready' ? '準備中…' : '存檔' }}
+    <p v-if="picker.error.value" class="result warn">{{ picker.error.value }}</p>
+    <p v-if="reading" class="hint">讀取發票 QR…</p>
+    <ul v-if="readMsg.length" class="list notes">
+      <li v-for="m in readMsg" :key="m" class="sub warn">{{ m }}</li>
+    </ul>
+
+    <form v-if="invoice" class="panel invoice" @submit.prevent="submitInvoice">
+      <h2>從發票讀到 {{ invoiceItemCount }} 個品項</h2>
+
+      <ul v-if="invoiceItemCount" class="list">
+        <li v-for="(item, i) in invoice.items" :key="`${item.name}-${i}`">
+          <div class="row">
+            <span>{{ item.name }}</span>
+            <span class="amount">{{ item.qty }} × {{ item.value }}</span>
+          </div>
+        </li>
+      </ul>
+      <p v-else class="hint">這張發票的 QR 裡沒有品項。</p>
+
+      <p v-if="invoice.invoiceNumber" class="sub">
+        {{ invoice.invoiceNumber }} · {{ invoice.date }}
+      </p>
+
+      <label class="field">
+        <span>店家</span>
+        <input
+          v-model="invoiceMerchant"
+          type="text"
+          placeholder="發票上沒有店家名稱，請自己填"
+          autocomplete="off"
+          :disabled="saving"
+        />
+      </label>
+
+      <template v-if="!hasHeader">
+        <label class="field">
+          <span>日期</span>
+          <input v-model="invoiceDate" type="date" :disabled="saving" />
+        </label>
+        <p class="hint">發票 QR 裡沒有日期，請照發票上的日期填</p>
+      </template>
+
+      <p v-if="invoiceTotal !== null" class="sub">
+        發票總計額 <strong>${{ invoiceTotal }}</strong>，存檔時以它為準。
+      </p>
+      <label v-else class="field">
+        <span>金額</span>
+        <input
+          v-model="invoiceAmount"
+          type="text"
+          inputmode="numeric"
+          placeholder="發票沒有總計額，請自己填"
+          :disabled="saving"
+        />
+      </label>
+
+      <!-- 品項那欄的「單價」語意未定，所以不幫忙加總；寧可讓人自己看發票。 -->
+      <p v-if="invoiceTotal === null && invoiceItemCount" class="hint">
+        上面的「數量 × 數字」直接來自發票，但規格沒說清楚那是單價還是小計，
+        所以不替你加總。
+      </p>
+
+      <ul v-if="invoice.notes.length" class="list notes">
+        <li v-for="note in invoice.notes" :key="note" class="sub warn">{{ note }}</li>
+      </ul>
+
+      <button type="submit" class="btn-primary" :disabled="!canSaveInvoice">
+        {{ saving ? '存檔中…' : '用發票資料存檔' }}
       </button>
     </form>
+
+    <button
+      v-if="!invoice"
+      type="button"
+      class="btn-primary"
+      :disabled="saving || reading || picker.working.value || state !== 'ready' || !text.trim()"
+      @click="submit"
+    >
+      {{ saving ? '存檔中…' : state !== 'ready' ? '準備中…' : '存檔' }}
+    </button>
 
     <p v-if="errorMsg" class="result warn">{{ errorMsg }}</p>
 
@@ -348,7 +388,7 @@ async function submitSample() {
   outline-offset: -1px;
 }
 
-form button {
+.page button {
   margin-top: var(--space-3);
 }
 
@@ -413,7 +453,7 @@ form button {
   padding: var(--space-2) 0;
 }
 
-.invoice .notes li {
+.notes li {
   border-bottom: none;
 }
 

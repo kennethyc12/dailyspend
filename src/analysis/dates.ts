@@ -27,6 +27,15 @@ export function daysInMonth(y: number, m: number): number {
   return new Date(Date.UTC(y, m, 0)).getUTCDate()
 }
 
+export const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/
+
+/** `YYYY-MM-DD` 而且是真實存在的日子。 */
+export function isValidIsoDate(iso: string): boolean {
+  if (!ISO_DATE.test(iso)) return false
+  const { y, m, d } = parseIso(iso)
+  return isValidYmd(y, m, d)
+}
+
 export function isValidYmd(y: number, m: number, d: number): boolean {
   return (
     Number.isInteger(y) &&
