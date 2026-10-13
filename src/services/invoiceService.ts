@@ -10,7 +10,7 @@ export interface InvoiceEntryInput {
   recognized: RecognizedInvoice
   /** 發票沒有店家欄位（只有賣方統編），所以店家一律由使用者填。 */
   merchant: string
-  /** QR 沒有總計額時由使用者輸入；有總計額時這裡傳 null 代表採信發票。 */
+  /** QR 沒有總計額時由使用者輸入；有總計額時忽略，以總計額為準（§5.4、D2c）。 */
   amount: number | null
   /** QR 沒有表頭時由使用者填；有表頭時忽略，以 QR 的日期為準（它決定 invoiceKey）。 */
   date?: string | null
@@ -35,7 +35,7 @@ export async function createFromInvoice(
 ): Promise<InvoiceEntryResult> {
   const { recognized, photo } = input
 
-  // §5.4：手輸金額與 QR 金額不一致時預設採信 QR，但兩個都要留下來。
+  // 有總計額就以它為準，不收手輸金額（§5.4、D2c）
   const amount = recognized.totalAmount ?? input.amount
   if (amount === null) return { ok: false, blocked: 'amount_missing' }
   if (!Number.isInteger(amount) || amount < 0) return { ok: false, blocked: 'amount_invalid' }
@@ -63,13 +63,8 @@ export async function createFromInvoice(
 
   const reasons = new Set<PendingReason>(classified.pendingReasons)
   if (!merchant) reasons.add('missing_merchant')
-  if (recognized.items.length === 0) reasons.add('recognition_failed')
-
-  const mismatched =
-    recognized.totalAmount !== null &&
-    input.amount !== null &&
-    input.amount !== recognized.totalAmount
-  if (mismatched) reasons.add('amount_mismatch')
+  // 只有沒有表頭也沒有品項才算辨識失敗；有表頭沒品項時用表頭的欄位（§5.4、D2b）
+  if (recognized.confidence === 0) reasons.add('recognition_failed')
 
   const pendingReasons = [...reasons]
 

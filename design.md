@@ -316,8 +316,8 @@ type PendingReason =
   | 'no_category_match'      // 沒有任何規則命中
   | 'ambiguous_merchant'     // 店家橫跨多類別且無品項
   | 'low_confidence'         // < settings.confidence.pendingBelow
-  | 'recognition_failed'     // QR 解析失敗
-  | 'amount_mismatch'        // 手輸金額 ≠ QR 金額
+  | 'recognition_failed'     // 沒有表頭也沒有品項（confidence 0）時由 service 設；B3b 之後頁面在 confidence 0 時不建面板，正式流程不會走到，保留為 service 契約與讀舊資料
+  | 'amount_mismatch'        // 目前沒有產生點（D2c：有總計額就不收手輸），保留是為了讀舊資料
   | 'duplicate_conflict'     // 同 invoiceKey 但欄位衝突
   | 'ambiguous_item_tokens'  // 快速輸入中間出現純數字 token（§4.3）
   | 'multi_item_correction'  // 多品項被整筆改分類，需逐項確認（§6.2）
@@ -580,10 +580,17 @@ Ver 1.9（財政部財政資訊中心，民國 111 年 5 月 10 日）PDF 第 7 
 只有表頭=0.8、只有品項=0.5、什麼都沒有=0），`pendingReasons` 由
 `createFromInvoice()` 補齊。
 
-- 偵測不到 QR → `recognizeConfidence: 0`，`recognition_failed`，**照片仍保存**，使用者手動補欄位。
+- ~~偵測不到 QR → `recognizeConfidence: 0`，`recognition_failed`，**照片仍保存**，使用者手動補欄位。~~
+  （2026-10-13 更正，D2a：讀不到 QR、讀取失敗、或 `parseEInvoicePayload()` 的 confidence 為 0 時不建發票面板，
+  顯示提示並走文字輸入；照片仍會附在文字紀錄上。B3b 實作。）
 - 只偵測到一個 QR → 用左 QR 的欄位，品項留空，`recognition_failed` 不設，但 `classifyConfidence` 依無品項的路徑走。
-- 解析部分成功 → 填入已知欄位，缺的留空，`status: 'pending'`。
-- 手輸金額 ≠ QR 金額 → 兩個數字都顯示，`amount_mismatch`，預設採信 QR，使用者可改。
+  （2026-10-13 起實作一致，D2b：`recognition_failed` 只在沒有表頭也沒有品項時設。）
+- ~~解析部分成功 → 填入已知欄位，缺的留空，`status: 'pending'`。~~
+  （2026-10-13 更正：缺的欄位存檔前就得補齊（日期、金額的規則見 §5.3）；缺店家有
+  `missing_merchant`、分類沒把握有分類相關的原因。不再因為「部分成功」本身強制 pending。）
+- ~~手輸金額 ≠ QR 金額 → 兩個數字都顯示，`amount_mismatch`，預設採信 QR，使用者可改。~~
+  （2026-10-13 更正，D2c：金額規則見 §5.3「金額只採信左方 QR 的總計額」；有總計額時畫面不顯示
+  金額欄，`amount_mismatch` 已無產生點。）
 
 ---
 

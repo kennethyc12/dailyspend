@@ -120,7 +120,7 @@ describe('從發票存檔', () => {
     expect(await storage.count('records')).toBe(0)
   })
 
-  it('手輸金額與發票不符時採信發票並標記 amount_mismatch', async () => {
+  it('有總計額時忽略手輸金額，不產生 amount_mismatch（§5.4、D2c）', async () => {
     await createFromInvoice(
       storage,
       { recognized: recognized(), merchant: '全家', amount: 999 },
@@ -129,8 +129,7 @@ describe('從發票存檔', () => {
 
     const r = await only()
     expect(r.amount).toBe(1050)
-    expect(r.pendingReasons).toContain('amount_mismatch')
-    expect(r.status).toBe('pending')
+    expect(r.pendingReasons).not.toContain('amount_mismatch')
   })
 
   it('沒填店家時標記 missing_merchant', async () => {
@@ -139,14 +138,29 @@ describe('從發票存檔', () => {
     expect((await only()).pendingReasons).toContain('missing_merchant')
   })
 
-  it('一個品項都沒解到時標記 recognition_failed', async () => {
+  it('有表頭但沒有品項時，不標記 recognition_failed（§5.4、D2b）', async () => {
     await createFromInvoice(
       storage,
       { recognized: recognized({ items: [], confidence: 0.8 }), merchant: '全家', amount: null },
       NOW,
     )
 
-    expect((await only()).pendingReasons).toContain('recognition_failed')
+    expect((await only()).pendingReasons).not.toContain('recognition_failed')
+  })
+
+  it('沒有表頭但有品項時，不標記 recognition_failed', async () => {
+    await createFromInvoice(
+      storage,
+      {
+        recognized: recognized({ invoiceNumber: null, date: null, totalAmount: null, confidence: 0.5 }),
+        merchant: '全家',
+        amount: 120,
+        date: '2026-10-11',
+      },
+      NOW,
+    )
+
+    expect((await only()).pendingReasons).not.toContain('recognition_failed')
   })
 
   it('同一張發票存兩次會合併成一筆（§7.2）', async () => {
