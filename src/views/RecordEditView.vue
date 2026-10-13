@@ -11,6 +11,7 @@ import {
   getRecord,
   removePhoto,
   updateRecordFields,
+  ValidationError,
 } from '@/services/entryService'
 import { usePhotoPicker } from '@/composables/usePhotoPicker'
 import { activeCategories, categoryName, refreshRecords } from '@/composables/useRecords'
@@ -31,9 +32,17 @@ const perItemNeeded = ref(false)
 
 const date = ref('')
 const merchant = ref('')
-const amount = ref('')
+// type="number" 的 v-model 會把輸入轉成數字，清空時則是 ''
+const amount = ref<string | number>('')
 const itemsText = ref('')
 const note = ref('')
+
+// 發票的品名可以含空白，所以一行一個品項，不用空白分隔
+const ITEM_SEPARATOR = '\n'
+
+function itemsToText(r: SpendRecord): string {
+  return r.items.map((i) => i.name).join(ITEM_SEPARATOR)
+}
 
 const dirty = computed(() => {
   const r = record.value
@@ -41,19 +50,25 @@ const dirty = computed(() => {
   return (
     date.value !== r.date ||
     merchant.value !== r.merchant ||
-    amount.value !== String(r.amount) ||
-    itemsText.value !== r.items.map((i) => i.name).join(' ') ||
+    String(amount.value) !== String(r.amount) ||
+    itemsText.value !== itemsToText(r) ||
     note.value !== r.note
   )
 })
 
+/** 載入時與存檔後：用紀錄重設整張表單。 */
 function fill(r: SpendRecord) {
   record.value = r
   date.value = r.date
   merchant.value = r.merchant
   amount.value = String(r.amount)
-  itemsText.value = r.items.map((i) => i.name).join(' ')
+  itemsText.value = itemsToText(r)
   note.value = r.note
+}
+
+/** 分類、照片這類立即生效的動作：只更新紀錄，保留使用者還沒存的修改。 */
+function applyRecord(r: SpendRecord) {
+  record.value = r
 }
 
 onMounted(async () => {
@@ -93,12 +108,15 @@ async function act(fn: () => Promise<void>) {
 function save() {
   const r = record.value
   if (!r) return
+  const itemsChanged = itemsText.value !== itemsToText(r)
   return act(async () => {
+    // 0 是合法金額，service 分不出「清空」和「填 0」，只能在 view 擋
+    if (amount.value === '') throw new ValidationError('金額不能空白', 'amount')
     const next = await updateRecordFields(storage, r, {
       date: date.value,
       merchant: merchant.value,
       amount: Number(amount.value),
-      itemNames: itemsText.value.split(/\s+/),
+      itemNames: itemsChanged ? itemsText.value.split(ITEM_SEPARATOR) : undefined,
       note: note.value,
     })
     fill(next)
@@ -111,7 +129,7 @@ function setCategory(categoryId: string) {
   if (!r || !categoryId) return
   return act(async () => {
     const { record: next, plan } = await correctCategory(storage, r, categoryId)
-    fill(next)
+    applyRecord(next)
     perItemNeeded.value = plan.kind === 'needs_per_item'
     message.value = plan.kind === 'create' || plan.kind === 'update' ? '已記住這條規則' : '已更新分類'
   })
@@ -122,7 +140,7 @@ function setItemCategory(index: number, categoryId: string) {
   if (!r || !categoryId) return
   return act(async () => {
     const { record: next } = await correctCategory(storage, r, categoryId, { kind: 'item', index })
-    fill(next)
+    applyRecord(next)
     message.value = '已記住這條規則'
   })
 }
@@ -138,7 +156,7 @@ function skipPerItem() {
       { kind: 'record' },
       { skipPerItem: true },
     )
-    fill(next)
+    applyRecord(next)
     perItemNeeded.value = false
   })
 }
@@ -149,7 +167,7 @@ function onPickPhoto(event: Event) {
   return act(async () => {
     const picked = await picker.pick(event)
     if (!picked) return
-    fill(await attachPhoto(storage, r, picked))
+    applyRecord(await attachPhoto(storage, r, picked))
     picker.showPreview(picked.blob)
     message.value = '照片已更新'
   })
@@ -159,7 +177,7 @@ function dropPhoto() {
   const r = record.value
   if (!r) return
   return act(async () => {
-    fill(await removePhoto(storage, r))
+    applyRecord(await removePhoto(storage, r))
     picker.clear()
     message.value = '照片已移除'
   })
@@ -199,7 +217,7 @@ function remove() {
         </label>
         <label class="field">
           <span>品項</span>
-          <input v-model="itemsText" type="text" placeholder="用空白分隔" :disabled="saving" />
+          <textarea v-model="itemsText" rows="3" placeholder="一行一個品項" :disabled="saving" />
         </label>
         <label class="field">
           <span>備註</span>
@@ -330,7 +348,8 @@ function remove() {
 }
 
 .field input,
-.field select {
+.field select,
+.field textarea {
   flex: 1;
   max-width: 62%;
   padding: var(--space-2);
@@ -340,6 +359,11 @@ function remove() {
   color: var(--c-text);
   /* iOS 在 font-size < 16px 的輸入框會自動放大畫面。 */
   font-size: 16px;
+}
+
+.field textarea {
+  font-family: inherit;
+  resize: vertical;
 }
 
 .mt {

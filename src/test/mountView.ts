@@ -58,12 +58,17 @@ export async function mountView(view: Component, path = '/'): Promise<VueWrapper
   return wrapper
 }
 
-export function field(wrapper: VueWrapper, label: string): DOMWrapper<HTMLInputElement | HTMLSelectElement> {
+export function field(
+  wrapper: VueWrapper,
+  label: string,
+): DOMWrapper<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement> {
   const found = wrapper
     .findAll('label')
     .find((l) => l.find('span').exists() && l.find('span').text() === label)
   if (!found) throw new Error(`找不到欄位「${label}」`)
-  const control = found.find<HTMLInputElement | HTMLSelectElement>('input, select')
+  const control = found.find<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>(
+    'input, select, textarea',
+  )
   if (!control.exists()) throw new Error(`欄位「${label}」沒有輸入元件`)
   return control
 }
@@ -80,10 +85,10 @@ export async function pickFile(input: DOMWrapper<HTMLInputElement>, file: File) 
 }
 
 /** 等到畫面上沒有任何 disabled 的輸入元件，代表非同步工作都結束、使用者可以操作了。 */
-export async function settled(wrapper: VueWrapper, selector = 'input, select') {
+export async function settled(wrapper: VueWrapper, selector = 'input, select, textarea') {
   await vi.waitFor(() => {
     const busy = wrapper
-      .findAll<HTMLInputElement | HTMLSelectElement>(selector)
+      .findAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>(selector)
       .filter((el) => el.element.disabled)
     expect(busy).toHaveLength(0)
   })
