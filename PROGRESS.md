@@ -48,6 +48,7 @@
 | C2a | 載具匯入的預覽與一次寫入（service 層） | ✅ | —，由單元測試涵蓋（沒有畫面） | — |
 | C2b | 備份頁的載具 CSV 匯入 | ✅ | ✅ | 2026-10-14 真機驗收 12 項全過 |
 | B4.1 | 店家與發票日期補好後，待確認原因自動解除 | ✅ | ✅ | 2026-10-14 真機：新建缺店家紀錄，編輯補上店家與品項後離開待確認頁 |
+| B4.2a | 待確認卡分成「確認」與「確認並記住規則」 | ✅ | ✅ | 2026-10-14 真機 3 項全過：多品項改類別卡片不消失、記住後逐項指定並完成確認、只按「確認」不學規則、「確認並記住」出現「已記住」且設定頁看得到 |
 
 ---
 
@@ -334,6 +335,8 @@ CI 加上 `npm run lint`，`package.json` 加上 `engines: node >=22`。
 ### Commit 紀錄
 
 ```
+d839379 feat(b4-2a): 待確認卡分成「確認」與「確認並記住規則」
+65878bc 記錄 B4.1 真機確認通過
 08375ef fix(b4-1): 店家與發票日期補好後，待確認原因自動解除
 1568dc2 記錄 C2b 真機驗收通過，invoiceKey 由真實資料證實
 ac48e1e feat(c2b): 備份頁可以匯入發票存摺的載具 CSV
@@ -403,7 +406,7 @@ v1 的程式寫完了。接下來最有價值的不是寫功能，是**讓真實
 | **C2a** ✅ | 載具匯入的 service 層：`prepareCarrierImport`（新增／合併／已存在／可能重複／無法匯入）、`planWrites`、`commitCarrierImport`（單一 transaction、過期檢查）；`mergeForWrite` 讓合併後重算 `invoiceKey`；抽出 `loadClassifier`、`applyClassification`、`bumpHits` | 匯入不走 `saveRecord`（使用者 2026-10-14 同意，偏離 design.md §7.3 末段），只共用 `mergeForWrite` |
 | **C2b** ✅ | 載具匯入的畫面：備份頁「匯入載具 CSV」（選檔 → 預覽 → 逐筆選擇可能重複 → 確認）、寫入後 `initStorage`／`prepareFiles`／`refreshRecords`；文件同步（design.md §1、§3.1、§7.1–§7.3、§9、§11、§11.3、§16，FEATURES，README） | 2026-10-14 真機驗收 12 項全過 |
 | **B4.1** ✅ | 狀態型原因（`missing_merchant`、`missing_invoice_date`）在 `prepareRecord` 補好就解除，`correctCategory` 也經過它；合併經過 `mergeForWrite` 一併解除；「確認」維持清空全部原因（Q4）；不做遷移（Q3）；規則見 design.md §3.7 | ~~要先決定哪些原因可自動解除~~（已決定，見 DECISIONS〈B4.1 research 後〉）。交接：已存成「有表頭沒品項」的紀錄仍帶著 `recognition_failed`，它是事件型，由「確認」清掉。~~另外 `carrierImportService.planInsert` 也會加 `missing_merchant`（第三個產生點，另兩個在 `quickInput.ts`、`invoiceService.ts`），統一時要一起收~~（B4.1 Q1 A：產生點維持三處，解除統一在 `prepareRecord`）。一次性例外：B4.1 之前就帶著過時 `missing_merchant` 的紀錄，上線後第一次重新匯入同一份 CSV 會判成「合併」（原因被解除），之後回到「已存在」 |
-| **B4.2a** | 待確認卡的「確認」與「確認並記住規則」：類別改草稿、`resolvePending` 單一 transaction 寫入規則與紀錄、多品項按「記住」才展開逐項面板（修掉改分類後卡片連同面板消失的 bug） | 偏離 design.md §6.2「修正即成規則」與 §10〈實作〉，使用者同意；編輯頁維持選了就學 |
+| **B4.2a** ✅ | 待確認卡的「確認」與「確認並記住規則」：類別改草稿、`resolvePending` 單一 transaction 寫入規則與紀錄、多品項按「記住」才展開逐項面板（修掉改分類後卡片連同面板消失的 bug） | 偏離 design.md §6.2「修正即成規則」與 §10〈實作〉，使用者同意；編輯頁維持選了就學 |
 | **B4.2b** | 待確認卡的原始輸入、照片縮圖、就地編輯欄位（research.md B4.2〈chris-dev 審閱與決定〉Q2、Q3、Q5） | 「來源：載具匯入」是 §10 以外的新 UI，要先問使用者；拆 `updateRecordFields` 算／寫 |
 | **B5** | 錯誤處理分工（業務結果走回傳值，非預期錯誤交全域） | 動到每個 view，靠 B1 的頁面測試當安全網；錯誤紀錄寫進 IndexedDB 延後 |
 | **B6** | 分析：門檻下限、佐證紀錄看得到 | — |
