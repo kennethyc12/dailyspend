@@ -11,7 +11,7 @@ import {
 } from '../invoiceKey'
 import { mergeRecords, sourceOf } from '../merge'
 import { IndexedDbAdapter } from '@/storage'
-import { prepareRecord, saveRecord } from '@/services/recordService'
+import { mergeForWrite, prepareRecord, saveRecord } from '@/services/recordService'
 
 const NOW = 1_760_000_000_000
 
@@ -255,6 +255,17 @@ describe('prepareRecord', () => {
     expect(r.invoiceKey).toBeNull()
     expect(r.pendingReasons).toEqual([])
     expect(r.status).toBe('confirmed')
+  })
+})
+
+describe('mergeForWrite', () => {
+  it('手輸紀錄（key null）併入帶號碼的發票後，invoiceKey 會重算', () => {
+    const manual = prepareRecord(rec({ date: '2026-10-05' }))
+    const carrier = rec({ date: '2026-10-05', invoiceNumber: 'AB12345678', sourceType: 'carrier' })
+    expect(manual.invoiceKey).toBeNull()
+
+    const { record } = mergeForWrite(manual, carrier, NOW)
+    expect(record.invoiceKey).toBe('11509-AB12345678')
   })
 })
 

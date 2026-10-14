@@ -2,6 +2,7 @@ import type { PendingReason, Photo, RecordItem, Rule, SpendRecord } from '@/mode
 import type { StoragePort } from '@/storage'
 import { parseQuickInput, type BlockingError, type QuickInputParse } from '@/parsing/quickInput'
 import { classifyWithRules } from '@/classify/ruleClassifier'
+import type { ClassifyInput } from '@/classify/port'
 import { planCorrection, type CorrectionPlan, type CorrectionScope } from '@/classify/correction'
 import { applyCorrection, loadActiveRules, recordHits } from './ruleService'
 import { prepareRecord, saveRecord, type SaveOutcome } from './recordService'
@@ -30,7 +31,7 @@ export class ValidationError extends Error {
   }
 }
 
-interface Classified {
+export interface Classified {
   categoryId: string | null
   itemCategoryIds: (string | null)[]
   classifyConfidence: number
@@ -38,15 +39,20 @@ interface Classified {
   pendingReasons: PendingReason[]
 }
 
-export async function classify(
-  storage: StoragePort,
-  input: { merchant: string | null; items: { name: string }[] },
-): Promise<Classified> {
+export type Classifier = (input: ClassifyInput) => Classified
+
+/** 讀一次規則與設定，之後同步分類。批次分類（載具匯入）不用每筆重讀規則。 */
+export async function loadClassifier(storage: StoragePort): Promise<Classifier> {
   const [rules, settings] = await Promise.all([
     loadActiveRules(storage),
     storage.get<Settings>('settings', 'settings'),
   ])
-  return classifyWithRules(input, rules, settings?.confidence.pendingBelow ?? 0.6)
+  const pendingBelow = settings?.confidence.pendingBelow ?? 0.6
+  return (input) => classifyWithRules(input, rules, pendingBelow)
+}
+
+export async function classify(storage: StoragePort, input: ClassifyInput): Promise<Classified> {
+  return (await loadClassifier(storage))(input)
 }
 
 export type EntryResult =
@@ -125,6 +131,24 @@ const CATEGORY_REASONS: PendingReason[] = [
   'ambiguous_merchant',
   'low_confidence',
 ]
+
+/** 套用分類結果：舊的分類原因換成新的，其他原因保留。呼叫端負責「使用者指定的類別不重跑」。 */
+export function applyClassification(record: SpendRecord, out: Classified): SpendRecord {
+  const pendingReasons = [
+    ...new Set<PendingReason>([
+      ...record.pendingReasons.filter((r) => !CATEGORY_REASONS.includes(r)),
+      ...out.pendingReasons,
+    ]),
+  ]
+  return {
+    ...record,
+    categoryId: out.categoryId,
+    classifyConfidence: out.classifyConfidence,
+    items: record.items.map((it, i) => ({ ...it, categoryId: out.itemCategoryIds[i] ?? null })),
+    pendingReasons,
+    status: pendingReasons.length > 0 ? 'pending' : 'confirmed',
+  }
+}
 
 export interface CorrectionResult {
   record: SpendRecord
@@ -270,18 +294,7 @@ export async function updateRecordFields(
   // 店家或品項變了就重跑分類，但使用者指定過的類別不動。
   if (structureChanged && record.categorySource !== 'user') {
     const out = await classify(storage, { merchant: merchant || null, items })
-    next = {
-      ...next,
-      categoryId: out.categoryId,
-      classifyConfidence: out.classifyConfidence,
-      items: items.map((it, i) => ({ ...it, categoryId: out.itemCategoryIds[i] ?? null })),
-      pendingReasons: [
-        ...new Set<PendingReason>([
-          ...next.pendingReasons.filter((r) => !CATEGORY_REASONS.includes(r)),
-          ...out.pendingReasons,
-        ]),
-      ],
-    }
+    next = applyClassification(next, out)
     await recordHits(storage, out.matchedRuleIds, now)
   }
 

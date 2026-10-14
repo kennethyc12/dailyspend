@@ -1,5 +1,5 @@
 import type { Rule, RuleOrigin, RuleType } from '@/models/types'
-import type { StoragePort } from '@/storage'
+import type { StoragePort, Tx } from '@/storage'
 import { builtinRules } from '@/classify/builtinRules'
 import { compareRules } from '@/classify/matching'
 import type { CorrectionPlan } from '@/classify/correction'
@@ -73,15 +73,17 @@ export async function recordHits(
   now = Date.now(),
 ): Promise<void> {
   if (ruleIds.length === 0) return
-  const rules = await Promise.all(ruleIds.map((id) => storage.get<Rule>('rules', id)))
-  const found = rules.filter((r): r is Rule => r !== undefined)
-  if (found.length === 0) return
+  await storage.transaction(['rules'], (tx) => bumpHits(tx, ruleIds, now))
+}
 
-  await storage.transaction(['rules'], async (tx) => {
-    for (const r of found) {
-      await tx.put('rules', { ...r, hitCount: r.hitCount + 1, lastHitAt: now })
-    }
-  })
+/** transaction 內累加命中次數。同一個 id 出現 n 次就加 n（匯入時跨紀錄的重複命中照次數算）。 */
+export async function bumpHits(tx: Tx, ruleIds: string[], now: number): Promise<void> {
+  const counts = new Map<string, number>()
+  for (const id of ruleIds) counts.set(id, (counts.get(id) ?? 0) + 1)
+  for (const [id, n] of counts) {
+    const rule = await tx.get<Rule>('rules', id)
+    if (rule) await tx.put('rules', { ...rule, hitCount: rule.hitCount + n, lastHitAt: now })
+  }
 }
 
 export async function applyCorrection(

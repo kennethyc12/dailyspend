@@ -1,7 +1,7 @@
 import type { PendingReason, Photo, SpendRecord } from '@/models/types'
 import { StorageConflictError, type StoragePort } from '@/storage'
 import { buildInvoiceKey } from '@/dedupe/invoiceKey'
-import { mergeRecords } from '@/dedupe/merge'
+import { mergeRecords, type MergeResult } from '@/dedupe/merge'
 
 /**
  * 補齊 derived 欄位。`invoiceKey` 只能由 `buildInvoiceKey()` 產生，
@@ -54,13 +54,26 @@ async function write(
   })
 }
 
+/**
+ * 合併的唯一入口。`mergeRecords` 是 `...existing` 展開，不會重算 invoiceKey——
+ * 手輸紀錄（key null）併進帶號碼的發票時，不重算的話下次匯入又會再比對一次。
+ */
+export function mergeForWrite(
+  existing: SpendRecord,
+  incoming: SpendRecord,
+  now: number,
+): MergeResult {
+  const merged = mergeRecords(existing, incoming, now)
+  return { ...merged, record: prepareRecord(merged.record) }
+}
+
 async function mergeInto(
   storage: StoragePort,
   existing: SpendRecord,
   incoming: SpendRecord,
   opts: SaveOptions,
 ): Promise<SaveOutcome> {
-  const merged = mergeRecords(existing, incoming, opts.now ?? Date.now())
+  const merged = mergeForWrite(existing, incoming, opts.now ?? Date.now())
   const photo = merged.discardedPhotoId ? undefined : opts.photo
   await write(storage, merged.record, photo)
 
@@ -74,8 +87,9 @@ async function mergeInto(
 }
 
 /**
- * §7.2 的寫入判斷。載具匯入日後走同一條路徑，「匯入去重筆數為 0」
- * 由這段程式保證。
+ * §7.2 的寫入判斷（手輸與 QR）。載具匯入為了單一 transaction 另有寫入路徑
+ * （`carrierImportService.ts`），只共用 `mergeForWrite` 的合併規則；
+ * 「匯入去重筆數為 0」由匯入自己的測試保證。
  */
 export async function saveRecord(
   storage: StoragePort,
