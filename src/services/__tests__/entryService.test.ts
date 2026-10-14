@@ -96,6 +96,21 @@ describe('文字輸入的完整流程（§9）', () => {
 })
 
 describe('修正分類（§6.2 在真實流程中）', () => {
+  it('改分類時，過時的 missing_merchant 也一併解除', async () => {
+    await createFromText(storage, '全家 地瓜 55', NOW)
+    const stale: SpendRecord = {
+      ...(await only()),
+      status: 'pending',
+      pendingReasons: ['missing_merchant', 'no_category_match'],
+    }
+    // B4.1 之前存下的舊資料：店家已補上，原因還掛著。
+    await storage.put('records', stale)
+
+    const { record } = await correctCategory(storage, stale, 'food')
+    expect(record.pendingReasons).toEqual([])
+    expect(record.status).toBe('confirmed')
+  })
+
   it('單品項修正後建立規則，下一筆同品項直接分對', async () => {
     await createFromText(storage, '小農 地瓜 60', NOW)
     const first = await only()
@@ -187,6 +202,21 @@ describe('確認與刪除', () => {
 })
 
 describe('編輯既有紀錄', () => {
+  it('補上店家後 missing_merchant 解除', async () => {
+    await createFromText(storage, '55', NOW)
+    const before = await only()
+    expect(before.pendingReasons).toContain('missing_merchant')
+
+    const next = await updateRecordFields(
+      storage,
+      before,
+      { merchant: '全家', itemNames: ['咖啡'] },
+      NOW + 1,
+    )
+    expect(next.pendingReasons).not.toContain('missing_merchant')
+    expect(next.status).toBe('confirmed')
+  })
+
   it('改金額與店家後存回', async () => {
     await createFromText(storage, '全家 咖啡 55', NOW)
     const next = await updateRecordFields(

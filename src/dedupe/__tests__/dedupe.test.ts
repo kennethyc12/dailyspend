@@ -256,6 +256,60 @@ describe('prepareRecord', () => {
     expect(r.pendingReasons).toEqual([])
     expect(r.status).toBe('confirmed')
   })
+
+  it('店家有值 → missing_merchant 解除，轉 confirmed', () => {
+    const r = prepareRecord(rec({ status: 'pending', pendingReasons: ['missing_merchant'] }))
+    expect(r.pendingReasons).toEqual([])
+    expect(r.status).toBe('confirmed')
+  })
+
+  it('店家只有空白 → missing_merchant 保留', () => {
+    const r = prepareRecord(
+      rec({ merchant: '  ', status: 'pending', pendingReasons: ['missing_merchant'] }),
+    )
+    expect(r.pendingReasons).toEqual(['missing_merchant'])
+    expect(r.status).toBe('pending')
+  })
+
+  it('店家空白但原本沒有 missing_merchant → 不會被加上', () => {
+    const r = prepareRecord(rec({ merchant: '' }))
+    expect(r.pendingReasons).toEqual([])
+  })
+
+  it('年期算得出來 → missing_invoice_date 解除', () => {
+    const r = prepareRecord(
+      rec({
+        invoiceNumber: 'AB12345678',
+        status: 'pending',
+        pendingReasons: ['missing_invoice_date'],
+      }),
+    )
+    expect(r.pendingReasons).toEqual([])
+  })
+
+  it('原因是空的但傳進來是 pending → confirmed', () => {
+    const r = prepareRecord(rec({ status: 'pending', pendingReasons: [] }))
+    expect(r.status).toBe('confirmed')
+  })
+
+  it('只解除狀態型原因，事件型原因保留', () => {
+    const r = prepareRecord(
+      rec({
+        status: 'pending',
+        pendingReasons: [
+          'missing_merchant',
+          'recognition_failed',
+          'duplicate_conflict',
+          'ambiguous_item_tokens',
+        ],
+      }),
+    )
+    expect(r.pendingReasons).toEqual([
+      'recognition_failed',
+      'duplicate_conflict',
+      'ambiguous_item_tokens',
+    ])
+  })
 })
 
 describe('mergeForWrite', () => {
@@ -266,6 +320,21 @@ describe('mergeForWrite', () => {
 
     const { record } = mergeForWrite(manual, carrier, NOW)
     expect(record.invoiceKey).toBe('11509-AB12345678')
+  })
+
+  it('沒有店家的 QR 紀錄被有店家的載具資料合併 → missing_merchant 解除', () => {
+    const qr = rec({
+      invoiceNumber: 'AB12345678',
+      sourceType: 'photo',
+      merchant: '',
+      status: 'pending',
+      pendingReasons: ['missing_merchant'],
+    })
+    const carrier = rec({ invoiceNumber: 'AB12345678', sourceType: 'carrier', merchant: '全家便利商店' })
+
+    const { record } = mergeForWrite(qr, carrier, NOW)
+    expect(record.merchant).toBe('全家便利商店')
+    expect(record.pendingReasons).not.toContain('missing_merchant')
   })
 })
 

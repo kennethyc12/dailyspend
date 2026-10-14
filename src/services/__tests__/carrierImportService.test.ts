@@ -226,9 +226,8 @@ describe('planWrites', () => {
         invoiceNumber: 'ZZ00000001',
         sourceType: 'photo',
         amount: 110,
-        merchant: '',
         status: 'pending',
-        pendingReasons: ['missing_merchant'],
+        pendingReasons: ['ambiguous_item_tokens'],
       }),
     )
     const preview = await prepare(TWO_ITEMS)

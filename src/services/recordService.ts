@@ -4,8 +4,9 @@ import { buildInvoiceKey } from '@/dedupe/invoiceKey'
 import { mergeRecords, type MergeResult } from '@/dedupe/merge'
 
 /**
- * 補齊 derived 欄位。`invoiceKey` 只能由 `buildInvoiceKey()` 產生，
- * 所有寫入路徑都必須先經過這裡。
+ * 補齊 derived 欄位。`invoiceKey` 只能由 `buildInvoiceKey()` 產生。
+ * 新增、編輯、改分類、合併都經過這裡；例外是「確認」（清空全部原因）
+ * 與換照片（只動 `photoId`），理由見 B4.1。
  */
 export function prepareRecord(input: SpendRecord): SpendRecord {
   const { invoicePeriod, invoiceKey } = buildInvoiceKey(input.date, input.invoiceNumber)
@@ -13,6 +14,10 @@ export function prepareRecord(input: SpendRecord): SpendRecord {
 
   // 有號碼卻推不出年期（日期缺或壞）→ 這張發票無法參與去重，請使用者補日期。
   if (input.invoiceNumber && !invoicePeriod) reasons.add('missing_invoice_date')
+  if (invoicePeriod) reasons.delete('missing_invoice_date')
+  // 狀態型原因補好就解除。只解除、不在這裡加：使用者確認過「沒有店家」後，
+  // 之後的編輯不該讓紀錄回到待確認（B4.1 Q1）。加原因留在新增的三個產生點。
+  if (input.merchant.trim() !== '') reasons.delete('missing_merchant')
 
   const pendingReasons = [...reasons]
   return {
@@ -20,7 +25,7 @@ export function prepareRecord(input: SpendRecord): SpendRecord {
     invoicePeriod,
     invoiceKey,
     pendingReasons,
-    status: pendingReasons.length > 0 ? 'pending' : input.status,
+    status: pendingReasons.length > 0 ? 'pending' : 'confirmed',
   }
 }
 

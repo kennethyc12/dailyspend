@@ -321,7 +321,11 @@ type PendingReason =
   | 'duplicate_conflict'     // 同 invoiceKey 但欄位衝突
   | 'ambiguous_item_tokens'  // 快速輸入中間出現純數字 token（§4.3）
   | 'multi_item_correction'  // 多品項被整筆改分類，需逐項確認（§6.2）
+  | 'missing_merchant'       // 店家空白；補上店家就解除，編輯不會重新加上（B4.1 補定）
+  | 'missing_invoice_date'   // 有號碼但算不出年期；補好日期就解除（B4.1 補定）
 ```
+
+**狀態型與事件型（B4.1 補定，2026-10-14）**：`missing_merchant`、`missing_invoice_date` 是狀態型，成立條件可以從紀錄現在的欄位算出來，在 `prepareRecord` 補好就解除（新增、編輯、改分類、合併都經過它；例外是「確認」，它本來就清空全部原因，以及換照片，它只動 `photoId`）。`prepareRecord` 只解除、不加 `missing_merchant`：使用者確認過「沒有店家」之後，再編輯不會讓紀錄回到待確認。分類原因（`no_category_match`、`ambiguous_merchant`、`low_confidence`）在重新分類或改分類時更新；事件型原因（略過的字、辨識失敗、合併衝突）要使用者按「確認」才會清掉；`amount_mismatch`、`multi_item_correction` 沒有產生點，只為讀舊資料保留。`status` 完全由原因推導。
 
 存成陣列，UI 把每個 reason 轉成一句人話並列出；不同 reason 對應不同的修正欄位聚焦。
 
@@ -690,7 +694,7 @@ invoiceKey = invoicePeriod && invoiceNumber
 >
 > **這是 unique index，上線後改 key 必須做資料遷移，所以現在定案。** 若樣本顯示 QR 內另有更可靠的唯一識別（例如含年期的完整欄位），以樣本為準並回來改本節——但那也要在 Phase 2 之前。
 
-邊界：`date` 缺失（純手輸 + 無 QR）時 `invoiceNumber` 通常也缺，`invoiceKey = null`，不參與去重。若有號碼無日期 → `invoiceKey = null` 且記 `pending(missing_invoice_date)`，讓使用者補日期。
+邊界：`date` 缺失（純手輸 + 無 QR）時 `invoiceNumber` 通常也缺，`invoiceKey = null`，不參與去重。若有號碼無日期 → `invoiceKey = null` 且記 `pending(missing_invoice_date)`，讓使用者補日期；補好之後自動解除（B4.1，2026-10-14）。
 
 **例外（載具匯入，2026-10-13 使用者同意）**：匯入時，同日同額、`invoiceKey = null` 的既有紀錄會列為「可能重複」，由使用者逐筆選擇要不要合併；選合併時把號碼補到既有紀錄上，並重算 `invoiceKey`（`mergeForWrite`）。系統不會自動判定兩筆是同一張，見 §11.3。
 

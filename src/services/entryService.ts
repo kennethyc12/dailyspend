@@ -200,10 +200,10 @@ export async function correctCategory(
           updatedAt: now,
         }
 
-  next.status = next.pendingReasons.length > 0 ? 'pending' : 'confirmed'
-  await storage.put('records', next)
+  const prepared = prepareRecord(next)
+  await storage.put('records', prepared)
 
-  return { record: next, plan }
+  return { record: prepared, plan }
 }
 
 /** §10 的「確認」：使用者看過了，清掉所有待確認原因。 */
