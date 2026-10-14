@@ -12,6 +12,23 @@ import {
   type RestorePreview,
 } from '@/services/backupService'
 import { useStorageStatus, initStorage } from '@/composables/useStorageStatus'
+import { refreshRecords } from '@/composables/useRecords'
+import {
+  CarrierImportStaleError,
+  commitCarrierImport,
+  planWrites,
+  prepareCarrierImport,
+  type CandidateChoices,
+  type CarrierImportPreview,
+  type WritePlan,
+} from '@/services/carrierImportService'
+import {
+  parseCarrierCsv,
+  type CarrierInvoice,
+  type CarrierRejectReason,
+  type RejectedInvoice,
+} from '@/parsing/carrierCsv'
+import type { SpendRecord } from '@/models/types'
 
 const { settings, state: storageState } = useStorageStatus()
 const storage = getStorage()
@@ -31,6 +48,64 @@ const errorMsg = ref<string | null>(null)
 const restorePreview = shallowRef<RestorePreview | null>(null)
 const safetyDelivered = ref(false)
 const restoring = ref(false)
+
+type ParsedCsv = { invoices: CarrierInvoice[]; rejected: RejectedInvoice[] }
+
+// 與 restorePreview 同理必須是 shallowRef：preview 裡的紀錄之後會原封不動寫進 IndexedDB。
+const importParsed = shallowRef<ParsedCsv | null>(null)
+const importPreview = shallowRef<CarrierImportPreview | null>(null)
+const importChoices = shallowRef<CandidateChoices>(new Map())
+const importing = ref(false)
+const importStale = ref(false)
+
+// 非預期錯誤（UI 一對一限制失效）交給全域 handler，不在這裡吞掉。
+const importPlan = computed(() =>
+  importPreview.value ? planWrites(importPreview.value, importChoices.value) : null,
+)
+
+const importLocked = computed(
+  () => storageState.value !== 'ready' || importing.value || restoring.value,
+)
+
+const REJECT_TEXT: Record<CarrierRejectReason, string> = {
+  number_missing: '缺少發票號碼',
+  date_invalid: '消費時間格式不對，或日期不存在',
+  rows_inconsistent: '同一張發票的時間、店家或統編不一致',
+  total_missing: '沒有總計',
+  total_zero: '總計是 0',
+  total_invalid: '總計不是正整數',
+  total_ambiguous: '總計出現不只一次',
+  subtotal_invalid: '小計不是整數',
+  qty_invalid: '個數格式不對（要是 0 或正數）',
+  item_name_missing: '品名空白',
+}
+
+const CONFLICT_TEXT: Record<string, string> = {
+  amount: '金額不同',
+  date: '日期不同',
+  invoiceNumber: '號碼不同',
+}
+
+function shortDate(iso: string): string {
+  const [, m, d] = iso.split('-')
+  return `${Number(m)}/${Number(d)}`
+}
+
+function invoiceLabel(inv: CarrierInvoice): string {
+  return `${shortDate(inv.date)} ${inv.merchant || '（無店家）'} $${inv.total}`
+}
+
+function recordLabel(r: SpendRecord): string {
+  const items = r.items.map((i) => i.name).join('、')
+  return `${shortDate(r.date)} ${r.merchant || '（無店家）'} $${r.amount}${items ? `（${items}）` : ''}`
+}
+
+function clearImport() {
+  importParsed.value = null
+  importPreview.value = null
+  importChoices.value = new Map()
+  importStale.value = false
+}
 
 const lastBackupText = computed(() => {
   const at = settings.value?.backup.lastBackupAt
@@ -86,9 +161,113 @@ async function exportBackup() {
   }
 }
 
+async function preparePreview(parsed: ParsedCsv) {
+  importPreview.value = await prepareCarrierImport(storage, parsed)
+  // 選擇以 entry index 為 key，新的 preview 一律從頭選。
+  importChoices.value = new Map()
+  importStale.value = false
+}
+
+async function onPickImportFile(e: Event) {
+  const input = e.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+  errorMsg.value = null
+  message.value = null
+  restorePreview.value = null
+  safetyDelivered.value = false
+  clearImport()
+  importing.value = true
+  try {
+    const parsed = parseCarrierCsv(await file.text())
+    if (!parsed.ok) {
+      errorMsg.value =
+        parsed.reason === 'header_mismatch'
+          ? '這不是發票存摺匯出的 CSV（表頭對不上）'
+          : `檔案第 ${parsed.line} 列格式損壞（引號沒關或欄數不對）`
+      return
+    }
+    importParsed.value = parsed
+    await preparePreview(parsed)
+  } catch (err) {
+    fail('讀取失敗', err)
+  } finally {
+    input.value = ''
+    importing.value = false
+  }
+}
+
+function choose(index: number, recordId: string | null) {
+  const next = new Map(importChoices.value)
+  if (recordId === null) next.delete(index)
+  else next.set(index, recordId)
+  importChoices.value = next
+}
+
+/** 這個候選已被哪一張發票（自己以外）選走；畫面顯示那張發票，不顯示內部 index。 */
+function takenBy(recordId: string, index: number): CarrierInvoice | null {
+  for (const [i, id] of importChoices.value) {
+    if (id === recordId && i !== index) return importPreview.value?.entries[i]?.invoice ?? null
+  }
+  return null
+}
+
+async function confirmImport() {
+  const preview = importPreview.value
+  if (!preview || importing.value) return
+  errorMsg.value = null
+  message.value = null
+  importing.value = true
+  try {
+    let plan: WritePlan
+    try {
+      plan = await commitCarrierImport(storage, preview, importChoices.value)
+    } catch (err) {
+      if (err instanceof CarrierImportStaleError) {
+        errorMsg.value = err.message
+        importStale.value = true
+        return
+      }
+      // 單一 transaction：只有 commit 本身失敗時「資料未變更」才成立。
+      fail('匯入失敗，資料未變更', err)
+      return
+    }
+    clearImport()
+    const summary = `匯入完成：新增 ${plan.inserted}、合併 ${plan.merged}、已存在 ${plan.unchanged}、無法匯入 ${plan.rejected}；其中 ${plan.newlyPending} 筆進待確認`
+    // initStorage 會自己 catch 錯誤，不會往外拋，只能看狀態
+    await initStorage()
+    if (storageState.value === 'failed') {
+      errorMsg.value = `匯入已完成（${plan.inserted + plan.merged} 筆），但重新載入失敗，請重新開啟 App`
+      return
+    }
+    await prepareFiles()
+    await refreshRecords()
+    message.value = summary
+  } catch (err) {
+    fail('匯入已完成，但更新畫面失敗', err)
+  } finally {
+    importing.value = false
+  }
+}
+
+async function repreview() {
+  if (!importParsed.value || importing.value) return
+  errorMsg.value = null
+  importing.value = true
+  try {
+    await preparePreview(importParsed.value)
+    message.value = '資料有變動，已重新預覽，請重新選擇'
+  } catch (err) {
+    fail('重新預覽失敗', err)
+  } finally {
+    importing.value = false
+  }
+}
+
 async function onPickRestoreFile(e: Event) {
   const file = (e.target as HTMLInputElement).files?.[0]
   if (!file) return
+  clearImport()
 
   errorMsg.value = null
   message.value = null
@@ -165,6 +344,101 @@ async function confirmRestore() {
       </button>
     </section>
 
+    <section class="panel">
+      <h2>匯入載具 CSV</h2>
+      <p class="hint">支援「發票存摺」App 匯出的 CSV。匯入會合併既有紀錄，建議先完整備份。</p>
+
+      <label class="file-label">
+        選擇 CSV
+        <input
+          type="file"
+          accept=".csv,text/csv,text/comma-separated-values"
+          :disabled="importLocked"
+          @change="onPickImportFile"
+        />
+      </label>
+
+      <div v-if="importPreview && importPlan" class="confirm import-preview">
+        <dl>
+          <dt>新增</dt>
+          <dd>{{ importPlan.inserted }} 張</dd>
+          <dt>合併</dt>
+          <dd>{{ importPlan.merged }} 張</dd>
+          <dt>已存在</dt>
+          <dd>{{ importPlan.unchanged }} 張</dd>
+          <dt>無法匯入</dt>
+          <dd>{{ importPlan.rejected }} 張</dd>
+          <dt>會進待確認</dt>
+          <dd>{{ importPlan.newlyPending }} 筆</dd>
+        </dl>
+
+        <template v-for="(e, i) in importPreview.entries" :key="e.invoice.invoiceNumber">
+          <fieldset v-if="e.kind === 'candidate'" class="entry">
+            <legend>可能重複：{{ invoiceLabel(e.invoice) }}</legend>
+            <p class="hint">
+              只比對同日同額。選「兩筆都留」之後再匯入同一份不會再問；要合併只能手動刪掉其中一筆。
+            </p>
+            <label class="choice">
+              <input
+                type="radio"
+                :name="`candidate-${i}`"
+                :checked="!importChoices.has(i)"
+                :disabled="importing"
+                @change="choose(i, null)"
+              />
+              兩筆都留
+            </label>
+            <label v-for="m in e.merges" :key="m.existing.id" class="choice">
+              <input
+                type="radio"
+                :name="`candidate-${i}`"
+                :checked="importChoices.get(i) === m.existing.id"
+                :disabled="importing || takenBy(m.existing.id, i) !== null"
+                @change="choose(i, m.existing.id)"
+              />
+              合併到：{{ recordLabel(m.existing) }}
+              <span v-if="takenBy(m.existing.id, i)" class="note">
+                已被 {{ invoiceLabel(takenBy(m.existing.id, i)!) }} 的發票選走
+              </span>
+              <span v-else class="note">合併後店名保留，品項換成發票明細</span>
+            </label>
+          </fieldset>
+
+          <div v-else-if="e.kind === 'merge'" class="entry">
+            <p>合併：{{ invoiceLabel(e.invoice) }}</p>
+            <p v-if="e.write.itemsReplaced" class="note">品項會換成發票明細</p>
+            <p v-for="c in e.write.conflicts" :key="c" class="note warn">
+              {{ CONFLICT_TEXT[c] ?? c }}，會標記待確認
+            </p>
+          </div>
+        </template>
+
+        <div v-for="r in importPreview.rejected" :key="r.lines.join(',')" class="entry">
+          <p>無法匯入：{{ r.invoiceNumber ?? '（無號碼）' }}（第 {{ r.lines.join('、') }} 列）</p>
+          <p class="note warn">{{ REJECT_TEXT[r.reason] }}</p>
+        </div>
+
+        <button v-if="importStale" class="btn-primary" :disabled="importing" @click="repreview">
+          重新預覽
+        </button>
+        <button
+          v-else
+          class="btn-primary"
+          :disabled="importing || importPlan.writes.length === 0"
+          @click="confirmImport"
+        >
+          {{
+            importing
+              ? '匯入中…'
+              : importPlan.writes.length === 0
+                ? '沒有要寫入的資料'
+                : '確認匯入'
+          }}
+        </button>
+        <button class="btn-text mt" :disabled="importing" @click="clearImport">取消</button>
+      </div>
+    </section>
+
     <section class="panel danger">
       <h2>還原</h2>
       <p class="hint">
@@ -174,7 +448,12 @@ async function confirmRestore() {
 
       <label class="file-label">
         選擇備份檔
-        <input type="file" accept=".zip,application/zip" @change="onPickRestoreFile" />
+        <input
+          type="file"
+          accept=".zip,application/zip"
+          :disabled="importing"
+          @change="onPickRestoreFile"
+        />
       </label>
 
       <div v-if="restorePreview" class="confirm">
@@ -316,6 +595,34 @@ button:disabled {
 }
 
 .warn {
+  color: var(--c-warn);
+}
+
+.entry {
+  border: 0;
+  border-top: 1px solid var(--c-border);
+  padding: var(--space-3) 0;
+  margin: 0;
+  font-size: 13px;
+}
+
+.entry legend {
+  font-weight: 600;
+  padding: 0;
+}
+
+.choice {
+  display: block;
+  margin-top: var(--space-2);
+}
+
+.note {
+  display: block;
+  color: var(--c-text-dim);
+  font-size: 12px;
+}
+
+.note.warn {
   color: var(--c-warn);
 }
 </style>

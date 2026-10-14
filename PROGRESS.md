@@ -45,7 +45,8 @@
 | B4 | design.md §5.4 規格與實作一致（D2a、D2b、D2c，以及「部分成功」條） | ✅ | —，由單元測試涵蓋 | — |
 | C1 | 載具 CSV（發票存摺格式）parser | ✅ | —，由單元測試涵蓋（沒有畫面） | 寫入與匯入頁在 C2 |
 | C1.5 | 重複購買排除 ≤ 0 的品項、次數以紀錄計 | ✅ | —，由單元測試涵蓋（沒有畫面） | — |
-| C2a | 載具匯入的預覽與一次寫入（service 層） | ✅ | —，由單元測試涵蓋（沒有畫面） | 匯入頁在 C2b |
+| C2a | 載具匯入的預覽與一次寫入（service 層） | ✅ | —，由單元測試涵蓋（沒有畫面） | — |
+| C2b | 備份頁的載具 CSV 匯入 | ✅ | ⏳ 待真機驗收 | — |
 
 ---
 
@@ -332,6 +333,7 @@ CI 加上 `npm run lint`，`package.json` 加上 `engines: node >=22`。
 ### Commit 紀錄
 
 ```
+bcc8739 feat(c2a): 載具 CSV 匯入的預覽與一次寫入（service 層）
 5dd9110 feat(c1-5): 重複購買不再把折扣當商品，也不把一次買多包算成多次
 5ad0314 feat(c1): 解析發票存摺匯出的載具 CSV
 198a024 fix(b4): 讓 design.md §5.4 的失敗處理規格與實作一致
@@ -395,7 +397,7 @@ v1 的程式寫完了。接下來最有價值的不是寫功能，是**讓真實
 | **C1** ✅ | 載具匯入第一批：解析發票存摺匯出的 CSV（pure function，沒有畫面、不寫入資料庫），規格見 design.md §11.3 | — |
 | **C1.5** ✅ | 重複購買排除 `amount <= 0` 的品項（負數回饋金、0 元附餐），次數改成以紀錄計（同一張發票的同名列只算一次），規則見 design.md §8.5 | 既有紀錄的結論可能變少（手輸或 QR 的同名品項） |
 | **C2a** ✅ | 載具匯入的 service 層：`prepareCarrierImport`（新增／合併／已存在／可能重複／無法匯入）、`planWrites`、`commitCarrierImport`（單一 transaction、過期檢查）；`mergeForWrite` 讓合併後重算 `invoiceKey`；抽出 `loadClassifier`、`applyClassification`、`bumpHits` | 匯入不走 `saveRecord`（使用者 2026-10-14 同意，偏離 design.md §7.3 末段），只共用 `mergeForWrite` |
-| **C2b** | 載具匯入的畫面：備份頁新增「匯入載具 CSV」（選檔 → 預覽 → 逐筆選擇可能重複 → 確認）、完成後 `prepareFiles()` 與 `initStorage()`、中文文案 | 文件同步：design.md §1 範圍表、§7.1 邊界段、§7.2、§7.3 末段（刪除線並註明出處）、§11 表格、§16；FEATURES、README。iOS 選檔的 `accept` 要真機驗。真機驗收前請使用者先匯出備份，並測「QR 紀錄 + 同一張 CSV → 1 筆」；驗收清單不列「編輯同名品項」。預覽要標示「品項會換成發票明細」，並說明「兩筆都留」之後不會再問、候選只比對同日同額。預覽物件一律用 `shallowRef`（深層 Proxy 寫入 IndexedDB 會丟 `DataCloneError`，Vitest 抓不到）。`CarrierImportStaleError` 已帶中文訊息，畫面直接顯示 `e.message`，不另寫文案。選擇以 entry index 為 key，畫面要照同一份 preview 的 `entries` 順序渲染 |
+| **C2b** ✅ | 載具匯入的畫面：備份頁「匯入載具 CSV」（選檔 → 預覽 → 逐筆選擇可能重複 → 確認）、寫入後 `initStorage`／`prepareFiles`／`refreshRecords`；文件同步（design.md §1、§3.1、§7.1–§7.3、§9、§11、§11.3、§16，FEATURES，README） | 真機驗收待做 |
 | **B4.1** | #10 待確認原因只加不減：補上欄位後原因不會自動解除；按「確認」會一次清掉全部原因（含未解決的） | 要先決定哪些原因可自動解除。交接：已存成「有表頭沒品項」的紀錄仍帶著 `recognition_failed`；`merge.ts` 合併時會把兩邊的 `pendingReasons` 取聯集，舊的 `recognition_failed` 會被帶過來。另外 `carrierImportService.planInsert` 也會加 `missing_merchant`（第三個產生點，另兩個在 `quickInput.ts`、`invoiceService.ts`），統一時要一起收 |
 | **B4.2** | U1 待確認卡缺欄位：design.md §10 要求原始輸入、照片縮圖、可直接編輯、「確認並記住規則」，`PendingView` 都沒有 | 待確認頁的 UI 改動，需要自己的 research |
 | **B5** | 錯誤處理分工（業務結果走回傳值，非預期錯誤交全域） | 動到每個 view，靠 B1 的頁面測試當安全網；錯誤紀錄寫進 IndexedDB 延後 |
@@ -403,13 +405,15 @@ v1 的程式寫完了。接下來最有價值的不是寫功能，是**讓真實
 | **B7** | 架構清理：`initStorage` 單一入口、重複文案、沒在用的 port 與設定項 | 刪 `RuleClassifier`／`ClassifierPort` 偏離 design.md §6.4，要先取得同意；`invoiceKey.ts` 自己的日期 regex（有 capture group）和 `dates.ts` 的 `ISO_DATE` 重複，評估能否共用 |
 | **B8** | 文件同步 | FEATURES.md:76「共 10 種」待確認原因（現在 11 種）、文件裡的測試數、design.md §3.7／§4.4 的新規則、「單價語意未定」的舊說法（FEATURES.md、`einvoicePayload.ts`、`invoiceService.ts`、`QuickInputView.vue:278-280`）、本文件「開發指令」的 CI 流程漏了 lint；編碼相關的舊說法：`FEATURES.md:136`「品項編碼已由實拍樣本確認是 UTF-8」、`design.md` §5.2.2「品項的編碼是 Base64 還是 Big5」、`design.md` §12〈#1 樣本可以延後到 Phase 9〉表格「QR 原始文字」那一列（還寫著「品項編碼…⏳ 仍缺」）、`qrDetect.ts:12` 的註解漏了 UTF-8 |
 
-另外七張 ticket：
+另外九張 ticket：
 - `rawRecognition` 只存解析後的結果，parser 有 bug 時事後救不回來。要不要另存原始 payload
 - `entryService.test.ts:85` 在台北時間 00:00–08:00 必定失敗（見「坑」第 9 點）
 - 依規格把左右 QR 串接後再解析（含 Base64 模式，編碼參數 2）：規格上左右 QR 是一段連續的內容，現在左右分開切三元組，斷點不在品項邊界時會漏品項。P3，目前 0 筆實例。觸發點：第一次遇到參數 2，或合規發票出現「湊不成」note。官方範例 payload 的測試併在這裡做。境外電商（參數 3）在參數之後多兩個 10 碼金額欄位，會讓品項三元組錯位，一併在這裡評估
 - 同名品項被合併：`updateRecordFields` 用品名當 key 對應既有品項，兩個同名品項只留最後一個的數量、金額與分類。P2，觸發點：發票出現同名品項（例如同品名不同規格）。**觸發點已到**：載具樣本 90 張中有 6 張含同名品項；使用者 2026-10-13 決定維持原排序
 - 已有照片和發票時再選一張，取消或壓縮失敗會把發票資料清掉（`onPickPhoto` 一開始就 `clearInvoice()`）。P3，照片仍附著、文字路徑可用，不會存錯資料。觸發點：有人回報重選照片失敗後發票面板不見
 - QR 路徑不讀 `needsReclassify`：`createFromInvoice` 合併後品項變了也不會重跑分類（載具匯入已用 `applyClassification` 處理）。觸發點：QR 合併進既有紀錄後分類明顯錯誤
+- 還原後待確認紅點不更新：`confirmRestore` 沒有呼叫 `refreshRecords()`，AppNav 的紅點要等使用者換頁才更新（匯入已處理）。觸發點：使用者回報還原後紅點不對，或併進 B5／B7
+- `prepareFiles()` 重組失敗時保留舊檔：只設 `errorMsg`，`csvFile`／`backupFile` 仍是舊的，匯出會拿到匯入或還原前的資料。修法：重組失敗時清掉舊檔或停用匯出。觸發點：使用者回報匯出的資料比畫面上舊
 - 「用發票資料存檔」沒有檢查儲存層是否初始化完成（文字的「存檔」有檢查 `state !== 'ready'`）。機率低，只記錄
 
 已評估、未採用：沒有總計額時用品項加總帶入金額（見 design.md §5.3 的觸發點）。
@@ -441,7 +445,7 @@ v1 的程式寫完了。接下來最有價值的不是寫功能，是**讓真實
 | 店家名稱合併工具（§8.2 已知限制） | 實際遇到 Netflix / 網飛 這類問題時再做 |
 | 元件測試 | 無阻塞。記帳頁與編輯頁現在只有 service 層測試 |
 | 從相簿選圖時讀 EXIF 拍攝時間 | 現在 `capturedAt` 是匯入時間 |
-| OCR、AI 分類、載具匯入 | 都在 v1 範圍外，需要時先討論 |
+| OCR、AI 分類、財政部官方載具格式 | 都在 v1 範圍外，需要時先討論（發票存摺 CSV 匯入已在 C2 完成） |
 
 ---
 

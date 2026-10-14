@@ -18,7 +18,7 @@
 | 輸入 | 手動快速輸入、發票照片 | 銀行串接 |
 | 辨識 | 台灣電子發票 QR code | OCR |
 | 分類 | 規則比對 | AI 推論 |
-| 匯入 | 無（預留介面） | 載具匯入 |
+| 匯入 | ~~無（預留介面）~~ 載具 CSV（發票存摺 App 匯出），見 §11.3（2026-10-14） | 財政部官方載具格式 |
 | 儲存 | 本機 IndexedDB | 雲端同步 |
 
 個資原則：發票號碼、載具號碼、照片一律只存本機，不經任何外部服務。
@@ -191,9 +191,9 @@ IndexedDB database `dailyspend`，schema version 1。
 | `invoicePeriod` | string \| null | 發票年期，民國年+期別起始月，如 `11509` |
 | `invoiceKey` | string \| null | **去重鍵**，`${invoicePeriod}-${invoiceNumber}`，見 §7 |
 | `invoiceRandomCode` | string \| null | QR 內隨機碼 |
-| `sourceType` | `'manual' \| 'photo' \| 'carrier'` | carrier 預留 |
+| `sourceType` | `'manual' \| 'photo' \| 'carrier'` | ~~carrier 預留~~ carrier：載具匯入（§11.3） |
 | `photoId` | string \| null | → `photos.id` |
-| `rawRecognition` | object \| null | 原始解析結果，debug 與回測用 |
+| `rawRecognition` | object \| null | 原始解析結果，debug 與回測用。載具匯入是 `{ source: 'invoice-passbook-csv', sellerTaxId, rows }`（合併進 QR 紀錄時保留 QR 的） |
 | `note` | string | |
 | `createdAt` | number | epoch ms |
 | `updatedAt` | number | epoch ms，**每次寫入必更新**。備份合併與日後同步靠它判斷新舊 |
@@ -692,6 +692,8 @@ invoiceKey = invoicePeriod && invoiceNumber
 
 邊界：`date` 缺失（純手輸 + 無 QR）時 `invoiceNumber` 通常也缺，`invoiceKey = null`，不參與去重。若有號碼無日期 → `invoiceKey = null` 且記 `pending(missing_invoice_date)`，讓使用者補日期。
 
+**例外（載具匯入，2026-10-13 使用者同意）**：匯入時，同日同額、`invoiceKey = null` 的既有紀錄會列為「可能重複」，由使用者逐筆選擇要不要合併；選合併時把號碼補到既有紀錄上，並重算 `invoiceKey`（`mergeForWrite`）。系統不會自動判定兩筆是同一張，見 §11.3。
+
 #### 號碼格式不做嚴格驗證（Phase 5 補定）
 
 標準格式是 2 個英文字母 + 8 位數字。`isStandardInvoiceNumber()` 只供 UI 提示，**不用於擋下寫入**：
@@ -711,6 +713,8 @@ else → merge(existing, incoming)
 
 查詢與寫入分屬不同 transaction（§2.2）；unique index 的 `ConstraintError` 作為最後防線，捕捉後轉 `duplicate_conflict` 並重跑 merge。
 
+這是手輸與 QR 的寫入路徑（`saveRecord`）。載具匯入為了全有或全無，另有單一 transaction 的寫入路徑（`commitCarrierImport`），合併規則共用 `mergeForWrite`，見 §11.3。
+
 ### 7.3 merge 規則（欄位級，來源優先序 user > carrier > qr > manual）
 
 | 欄位 | 策略 |
@@ -722,7 +726,9 @@ else → merge(existing, incoming)
 | `note` | 兩者串接 |
 | `updatedAt` | 一律更新為 `Date.now()` |
 
-載具匯入（日後）走同一條 merge 路徑，`sourceType: 'carrier'`，所以「匯入去重筆數為 0」由同一段程式保證。
+~~載具匯入（日後）走同一條 merge 路徑，`sourceType: 'carrier'`，所以「匯入去重筆數為 0」由同一段程式保證。~~
+
+**實情（2026-10-14 使用者同意偏離）**：載具匯入要在單一 transaction 內全有或全無，不能逐筆走 `saveRecord`，所以寫入判斷另有一份（`carrierImportService.ts`）。共用的是合併規則：兩條路徑都經過 `mergeForWrite()`（`mergeRecords` + `prepareRecord`）。「匯入去重筆數為 0」改由匯入自己的測試保證（重新匯入同一份，總筆數不變）。
 
 #### 第一列的矛盾（Phase 5 補定）
 
@@ -918,6 +924,8 @@ v1 手動輸入沒有單品金額，`item.amount` 幾乎都是 `null`。定案�
 
 **虛線以上全部在 transaction 之外。** 照片與紀錄的實際寫入在同一個 transaction 內，避免孤兒照片。
 
+載具匯入的資料流程見 §11.3。
+
 ---
 
 ## 10. 待確認佇列
@@ -966,6 +974,7 @@ v1 手動輸入沒有單品金額，`item.amount` 幾乎都是 `null`。定案�
 | CSV 匯出 | UTF-8 with BOM（Excel 相容） | 一筆紀錄一列，items 以 `;` 串接；可選日期區間 |
 | 完整備份 | `.zip`（JSON + 照片） | records + categories + rules + settings + photos |
 | 還原 | 讀 zip | **覆寫操作，需二次確認**，並先自動匯出一份當前備份 |
+| 載具 CSV 匯入 | 讀發票存摺 CSV | 預覽 → 選擇可能重複 → 一次寫入；見 §11.3 |
 
 CSV 欄位順序：
 `date, merchant, items, amount, category, categorySource, classifyConfidence, status, invoiceKey, note`
@@ -1086,6 +1095,22 @@ IndexedDB 的寫入走 structured clone，而 **Proxy 不可複製**。把待還
 | `item_name_missing`／`qty_invalid`／`subtotal_invalid` | 品項**逐列**檢查，每列依序看品名空白、個數不是非負小數、小計不是整數，回報第一個遇到的原因。`item_name_missing` 的觸發點：真實資料出現沒有明細的發票時，重新評估要不要改收成 `items: []` |
 
 這個順序是契約（有測試鎖住）：C2 的預覽顯示哪個原因取決於它。原因用代號，中文文案集中在匯入頁（C2）。
+
+#### 匯入流程（C2a／C2b 補定，2026-10-14）
+
+入口在備份頁「匯入載具 CSV」（匯出與還原之間）。儲存層初始化完成前不能選檔（規則還沒載入的話，每一筆都會分不出類別）。
+
+1. **預覽**（`prepareCarrierImport`，只讀）：每張發票分成
+   - 新增：沒有同 `invoiceKey` 的紀錄，也沒有候選
+   - 合併：有同 `invoiceKey` 的紀錄，合併後會改變它（品項依 §7.3 整份替換、衝突照樣標 `duplicate_conflict`）
+   - 已存在：有同 `invoiceKey` 的紀錄，合併後除了 `updatedAt` 完全相同 → 不寫入
+   - 可能重複：沒有同 key，但有同日同額、`invoiceKey = null` 的紀錄（§7.1 例外）
+   - 無法匯入：parser 拒收的發票（原因與列號）
+
+   預覽就算好每一筆最終要寫入的紀錄，含分類。合併時 incoming 不帶分類，只有品項變了（`needsReclassify`）才重跑，所以重新匯入同一份是冪等的。
+2. **選擇**：每張可能重複的發票預設「兩筆都留」；可改成「合併到」某個候選，一個候選只能被一張發票選走。選了兩筆都留之後，CSV 那筆有了 `invoiceKey`，再匯入同一份會變成「已存在」，不會再問；要合併只能手動刪掉其中一筆。
+3. **寫入**（`commitCarrierImport`）：單一 transaction，含規則命中次數。寫入前檢查預覽之後資料沒有變動（既有紀錄的 `updatedAt`、新的 `invoiceKey` 沒被別筆用掉、候選集合沒變），有變動就整批中止，請使用者重新預覽。
+4. **寫入後**：`initStorage()`（筆數、備份提醒）→ 重組匯出檔 → 重載紀錄快取（待確認紅點）。
 
 ---
 
@@ -1270,4 +1295,4 @@ CI 的順序是 `lint → test → build → deploy`。
 
 ## 16. 不在 v1 的清單（避免範圍漂移）
 
-OCR、AI 分類、載具匯入、銀行串接、多人、多幣別、預算上限提醒、圖表以外的報表、跨裝置同步、多品項金額對應剖析、品項模糊比對、店家名稱同義詞合併、刪除規則時回溯套用、即時鏡頭掃描、月對月比較的 `completedMonthsOnly` 模式。
+OCR、AI 分類、~~載具匯入~~（發票存摺 CSV 已做，見 §11.3；財政部官方格式仍在範圍外）、銀行串接、多人、多幣別、預算上限提醒、圖表以外的報表、跨裝置同步、多品項金額對應剖析、品項模糊比對、店家名稱同義詞合併、刪除規則時回溯套用、即時鏡頭掃描、月對月比較的 `completedMonthsOnly` 模式。
