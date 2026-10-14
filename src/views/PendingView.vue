@@ -8,6 +8,7 @@ import {
   pendingRecords,
   refreshRecords,
 } from '@/composables/useRecords'
+import { useThumbnails } from '@/composables/useThumbnails'
 import { correctCategory, deleteRecord, resolvePending } from '@/services/entryService'
 
 const storage = getStorage()
@@ -19,6 +20,7 @@ const confirmingDelete = ref<string | null>(null)
 const perItemFor = shallowRef<Set<string>>(new Set())
 /** 卡片上選的類別，按確認才寫入（B4.2a）。沒有草稿就用紀錄現在的類別。 */
 const drafts = ref<Record<string, string>>({})
+const thumbs = useThumbnails(() => pendingRecords.value.map((r) => r.photoId))
 
 onMounted(refreshRecords)
 
@@ -130,6 +132,13 @@ function remove(record: SpendRecord) {
         <span class="amount">${{ r.amount }}</span>
       </div>
       <p class="sub">{{ r.date }} · {{ r.items.map((i) => i.name).join('、') || '無品項' }}</p>
+      <p v-if="r.rawInput" class="raw">原始輸入：{{ r.rawInput }}</p>
+      <img
+        v-if="r.photoId && thumbs[r.photoId]"
+        :src="thumbs[r.photoId]"
+        alt="發票照片"
+        class="thumb"
+      />
 
       <ul class="reasons">
         <li v-for="reason in r.pendingReasons" :key="reason">{{ REASON_TEXT[reason] }}</li>
@@ -230,6 +239,22 @@ function remove(record: SpendRecord) {
   margin-top: 2px;
   font-size: 13px;
   color: var(--c-text-dim);
+}
+
+.raw {
+  margin-top: 2px;
+  font-size: 13px;
+  color: var(--c-text-dim);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.thumb {
+  display: block;
+  max-height: 96px;
+  margin-top: var(--space-2);
+  border: 1px solid var(--c-border);
+  border-radius: 8px;
 }
 
 .reasons {

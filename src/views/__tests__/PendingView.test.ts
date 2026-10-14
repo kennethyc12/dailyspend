@@ -1,11 +1,13 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi } from 'vitest'
-import type { VueWrapper } from '@vue/test-utils'
+import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import QuickInputView from '@/views/QuickInputView.vue'
 import PendingView from '@/views/PendingView.vue'
-import type { Rule, SpendRecord } from '@/models/types'
+import type { Photo, Rule, SpendRecord } from '@/models/types'
+import type { StoreKey, StoreName } from '@/storage'
 import { createFromText } from '@/services/entryService'
 import { refreshRecords } from '@/composables/useRecords'
+import { router } from '@/router'
 import { button, mountView, settled, useViewTest, waitForText } from '@/test/mountView'
 
 vi.mock('@/recognize/qrDetect', () => ({
@@ -142,5 +144,240 @@ describe('確認與確認並記住規則（B4.2a）', () => {
 
     await waitForText(pending, '沒有待確認的紀錄')
     expect(await storage().getAll('records')).toHaveLength(0)
+  })
+})
+
+describe('原始輸入與縮圖（B4.2b-1）', () => {
+  // pendingRecords 是模組層級狀態：先 refreshRecords，immediate watch 才不會讀到上一個測試的 photoId
+  async function open() {
+    await refreshRecords()
+    const wrapper = await mountView(PendingView, '/pending')
+    await settled(wrapper)
+    return wrapper
+  }
+
+  async function pendingWithPhoto(text: string, photo?: Photo) {
+    await createFromText(storage(), text, undefined, photo)
+    return open()
+  }
+
+  function fakePhoto(id: string): Photo {
+    return {
+      id,
+      blob: new Blob(['full'], { type: 'image/jpeg' }),
+      thumbBlob: new Blob(['thumb'], { type: 'image/jpeg' }),
+      width: 10,
+      height: 10,
+      bytes: 5,
+      capturedAt: 0,
+    }
+  }
+
+  function bareRecord(overrides: Partial<SpendRecord>): SpendRecord {
+    return {
+      id: 'r1',
+      date: '2026-01-01',
+      merchant: '某店',
+      amount: 320,
+      items: [],
+      categoryId: null,
+      categorySource: 'rule',
+      classifyConfidence: 0,
+      recognizeConfidence: null,
+      status: 'pending',
+      pendingReasons: ['no_category_match'],
+      invoiceNumber: null,
+      invoicePeriod: null,
+      invoiceKey: null,
+      invoiceRandomCode: null,
+      sourceType: 'manual',
+      photoId: null,
+      rawRecognition: null,
+      note: '',
+      createdAt: 0,
+      updatedAt: 0,
+      ...overrides,
+    }
+  }
+
+  function spyGet() {
+    const s = storage()
+    const real = s.get.bind(s)
+    return vi.spyOn(s, 'get').mockImplementation(real)
+  }
+
+  /** 讓 photos 的讀取停住，手動放行；其他 store 照常。 */
+  function holdPhotoReads() {
+    const s = storage()
+    const real = s.get.bind(s)
+    const gates: (() => void)[] = []
+    const get = vi
+      .spyOn(s, 'get')
+      .mockImplementation(async <T>(store: StoreName, key: StoreKey) => {
+        if (store === 'photos') await new Promise<void>((r) => gates.push(r))
+        return real<T>(store, key)
+      })
+    return { get, release: () => gates.splice(0).forEach((r) => r()) }
+  }
+
+  /** 負向斷言前的同步點：等那一次 photos 讀取真的回來。 */
+  async function photoReadDone(get: ReturnType<typeof spyGet>, id: string) {
+    await vi.waitFor(() => expect(get).toHaveBeenCalledWith('photos', id))
+    const i = get.mock.calls.findIndex(([store, key]) => store === 'photos' && key === id)
+    await get.mock.results[i]!.value
+    await flushPromises()
+  }
+
+  function card(wrapper: VueWrapper, merchant: string) {
+    const found = wrapper.findAll('section').find((s) => s.find('.merchant').text() === merchant)
+    if (!found) throw new Error(`找不到卡片「${merchant}」`)
+    return found
+  }
+
+  const confirmIn = (wrapper: VueWrapper, merchant: string) =>
+    card(wrapper, merchant)
+      .findAll('button')
+      .find((b) => b.text() === '確認（目前為 待確認）')!
+      .trigger('click')
+
+  const createUrl = () => vi.mocked(URL.createObjectURL)
+  const revokeUrl = () => vi.mocked(URL.revokeObjectURL)
+
+  it('顯示當初打的原始輸入', async () => {
+    const pending = await pendingWithPhoto('某店 甲甲 55 乙乙')
+
+    expect(pending.text()).toContain('原始輸入：某店 甲甲 55 乙乙')
+  })
+
+  it('原始輸入不正規化', async () => {
+    const pending = await pendingWithPhoto('某店 甲甲 ５５ 乙乙')
+
+    expect(pending.text()).toContain('原始輸入：某店 甲甲 ５５ 乙乙')
+  })
+
+  it('沒有原始輸入也沒有照片：不顯示原始輸入、不讀照片', async () => {
+    await storage().put('records', bareRecord({}))
+    const get = spyGet()
+    const pending = await open()
+
+    expect(pending.text()).toContain('某店')
+    expect(pending.text()).not.toContain('原始輸入')
+    expect(get.mock.calls.filter(([store]) => store === 'photos')).toHaveLength(0)
+  })
+
+  it('有照片：顯示縮圖，用的是縮圖不是原圖', async () => {
+    const pending = await pendingWithPhoto('某店 320', fakePhoto('p1'))
+
+    await vi.waitFor(() => expect(pending.find('img[alt="發票照片"]').exists()).toBe(true))
+    expect(await (createUrl().mock.calls[0]![0] as Blob).text()).toBe('thumb')
+  })
+
+  it('照片已不存在：不顯示縮圖', async () => {
+    await storage().put('records', bareRecord({ photoId: 'gone' }))
+    const get = spyGet()
+    const pending = await open()
+    await photoReadDone(get, 'gone')
+
+    expect(pending.find('img[alt="發票照片"]').exists()).toBe(false)
+    expect(createUrl()).not.toHaveBeenCalled()
+  })
+
+  it('確認後卡片離開，縮圖網址被釋放', async () => {
+    const pending = await pendingWithPhoto('某店 320', fakePhoto('p1'))
+    await vi.waitFor(() => expect(pending.find('img[alt="發票照片"]').exists()).toBe(true))
+    await confirmIn(pending, '某店')
+    await waitForText(pending, '沒有待確認的紀錄')
+
+    expect(revokeUrl()).toHaveBeenCalledWith('blob:test')
+  })
+
+  it('離開頁面：縮圖網址被釋放', async () => {
+    const pending = await pendingWithPhoto('某店 320', fakePhoto('p1'))
+    await vi.waitFor(() => expect(pending.find('img[alt="發票照片"]').exists()).toBe(true))
+    pending.unmount()
+
+    expect(revokeUrl()).toHaveBeenCalledWith('blob:test')
+  })
+
+  it('確認其中一張：只釋放那張的縮圖，另一張不重建', async () => {
+    let n = 0
+    createUrl().mockImplementation(() => `blob:${++n}`)
+    await createFromText(storage(), '甲店 320', undefined, fakePhoto('p1'))
+    await createFromText(storage(), '乙店 320', undefined, fakePhoto('p2'))
+    const pending = await open()
+    await vi.waitFor(() => expect(pending.findAll('img[alt="發票照片"]')).toHaveLength(2))
+    const urlOfA = card(pending, '甲店').find('img').attributes('src')!
+    const urlOfB = card(pending, '乙店').find('img').attributes('src')!
+
+    await confirmIn(pending, '甲店')
+    await vi.waitFor(() => expect(pending.text()).not.toContain('甲店'))
+
+    expect(revokeUrl()).toHaveBeenCalledWith(urlOfA)
+    expect(revokeUrl()).not.toHaveBeenCalledWith(urlOfB)
+    expect(createUrl()).toHaveBeenCalledTimes(2)
+  })
+
+  it('照片還沒讀完就確認：不建立縮圖網址', async () => {
+    await createFromText(storage(), '某店 320', undefined, fakePhoto('p1'))
+    const { get, release } = holdPhotoReads()
+    const pending = await open()
+    await vi.waitFor(() => expect(get).toHaveBeenCalledWith('photos', 'p1'))
+    await confirmIn(pending, '某店')
+    await waitForText(pending, '沒有待確認的紀錄')
+    release()
+    await photoReadDone(get, 'p1')
+
+    expect(createUrl()).not.toHaveBeenCalled()
+  })
+
+  it('照片還沒讀完就離開頁面：不建立縮圖網址', async () => {
+    await createFromText(storage(), '某店 320', undefined, fakePhoto('p1'))
+    const { get, release } = holdPhotoReads()
+    const pending = await open()
+    await vi.waitFor(() => expect(get).toHaveBeenCalledWith('photos', 'p1'))
+    pending.unmount()
+    release()
+    await photoReadDone(get, 'p1')
+
+    expect(createUrl()).not.toHaveBeenCalled()
+  })
+
+  it('照片還沒讀完時頁面重整：不重複讀同一張', async () => {
+    await createFromText(storage(), '甲店 320', undefined, fakePhoto('p1'))
+    await createFromText(storage(), '乙店 320')
+    const { get, release } = holdPhotoReads()
+    const pending = await open()
+    await vi.waitFor(() => expect(get).toHaveBeenCalledWith('photos', 'p1'))
+    await confirmIn(pending, '乙店')
+    await vi.waitFor(() => expect(pending.text()).not.toContain('乙店'))
+    release()
+
+    await vi.waitFor(() => expect(pending.find('img[alt="發票照片"]').exists()).toBe(true))
+    expect(get.mock.calls.filter(([store]) => store === 'photos')).toHaveLength(1)
+    expect(createUrl()).toHaveBeenCalledTimes(1)
+  })
+
+  it('讀照片失敗：錯誤交給全域處理', async () => {
+    await createFromText(storage(), '某店 320', undefined, fakePhoto('p1'))
+    await refreshRecords()
+    const s = storage()
+    const real = s.get.bind(s)
+    const boom = new Error('讀照片失敗')
+    vi.spyOn(s, 'get').mockImplementation(<T>(store: StoreName, key: StoreKey) =>
+      store === 'photos' ? Promise.reject(boom) : real<T>(store, key),
+    )
+    const errorHandler = vi.fn()
+    await router.replace('/pending')
+    const wrapper = mount(PendingView, {
+      attachTo: document.body,
+      global: { plugins: [router], config: { errorHandler } },
+    })
+
+    try {
+      await vi.waitFor(() => expect(errorHandler).toHaveBeenCalled())
+      expect(errorHandler).toHaveBeenCalledWith(boom, expect.anything(), 'watcher callback')
+    } finally {
+      wrapper.unmount()
+    }
   })
 })
