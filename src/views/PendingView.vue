@@ -8,14 +8,17 @@ import {
   pendingRecords,
   refreshRecords,
 } from '@/composables/useRecords'
-import { confirmRecord, correctCategory, deleteRecord } from '@/services/entryService'
+import { correctCategory, deleteRecord, resolvePending } from '@/services/entryService'
 
 const storage = getStorage()
 const errorMsg = ref<string | null>(null)
+const notice = ref<string | null>(null)
 const busyId = ref<string | null>(null)
 const confirmingDelete = ref<string | null>(null)
 /** 哪幾筆正展開「逐項指定類別」面板（§6.2 多品項不自動學）。 */
 const perItemFor = shallowRef<Set<string>>(new Set())
+/** 卡片上選的類別，按確認才寫入（B4.2a）。沒有草稿就用紀錄現在的類別。 */
+const drafts = ref<Record<string, string>>({})
 
 onMounted(refreshRecords)
 
@@ -40,10 +43,30 @@ function togglePerItem(id: string, on: boolean) {
   perItemFor.value = next
 }
 
+function draftOf(r: SpendRecord): string {
+  return drafts.value[r.id] ?? r.categoryId ?? ''
+}
+
+function setDraft(id: string, categoryId: string) {
+  drafts.value = { ...drafts.value, [id]: categoryId }
+}
+
+function forget(id: string) {
+  const next = { ...drafts.value }
+  delete next[id]
+  drafts.value = next
+  togglePerItem(id, false)
+}
+
+function learnedText(pattern: string, categoryId: string): string {
+  return `已記住：${pattern} → ${categoryName.value(categoryId)}（可在設定 › 規則中刪除）`
+}
+
 async function run(id: string, fn: () => Promise<void>) {
   if (busyId.value) return
   busyId.value = id
   errorMsg.value = null
+  notice.value = null
   try {
     await fn()
     await refreshRecords()
@@ -54,39 +77,30 @@ async function run(id: string, fn: () => Promise<void>) {
   }
 }
 
-function setRecordCategory(record: SpendRecord, categoryId: string) {
-  if (!categoryId) return
-  return run(record.id, async () => {
-    const { plan } = await correctCategory(storage, record, categoryId)
-    // 多品項改整筆時不自動學品項規則，改請使用者逐項指定。
-    togglePerItem(record.id, plan.kind === 'needs_per_item')
-  })
-}
-
 function setItemCategory(record: SpendRecord, index: number, categoryId: string) {
   if (!categoryId) return
   return run(record.id, async () => {
     await correctCategory(storage, record, categoryId, { kind: 'item', index })
+    notice.value = learnedText(record.items[index]!.name, categoryId)
   })
 }
 
-function skipPerItem(record: SpendRecord) {
+function resolve(record: SpendRecord, remember: boolean, skipPerItem = false) {
   return run(record.id, async () => {
-    await correctCategory(
-      storage,
-      record,
-      record.categoryId ?? '',
-      { kind: 'record' },
-      { skipPerItem: true },
-    )
-    togglePerItem(record.id, false)
-  })
-}
-
-function confirm(record: SpendRecord) {
-  return run(record.id, async () => {
-    await confirmRecord(storage, record)
-    togglePerItem(record.id, false)
+    const out = await resolvePending(storage, record, {
+      categoryId: draftOf(record) || null,
+      remember,
+      skipPerItem,
+    })
+    if (out.kind === 'needs_per_item') {
+      togglePerItem(record.id, true)
+      return
+    }
+    forget(record.id)
+    if (!remember) return
+    notice.value = out.learned
+      ? learnedText(out.learned.pattern, out.learned.categoryId)
+      : '沒有店家或品項可記，只確認'
   })
 }
 
@@ -94,6 +108,7 @@ function remove(record: SpendRecord) {
   return run(record.id, async () => {
     await deleteRecord(storage, record)
     confirmingDelete.value = null
+    forget(record.id)
   })
 }
 </script>
@@ -107,6 +122,7 @@ function remove(record: SpendRecord) {
     </p>
 
     <p v-if="errorMsg" class="result warn">{{ errorMsg }}</p>
+    <p v-if="notice" class="result ok">{{ notice }}</p>
 
     <section v-for="r in pendingRecords" :key="r.id" class="panel">
       <div class="row">
@@ -122,9 +138,9 @@ function remove(record: SpendRecord) {
       <label class="field">
         <span>類別</span>
         <select
-          :value="r.categoryId ?? ''"
+          :value="draftOf(r)"
           :disabled="busyId === r.id"
-          @change="setRecordCategory(r, ($event.target as HTMLSelectElement).value)"
+          @change="setDraft(r.id, ($event.target as HTMLSelectElement).value)"
         >
           <option value="" disabled>請選擇</option>
           <option v-for="c in activeCategories" :key="c.id" :value="c.id">
@@ -151,15 +167,30 @@ function remove(record: SpendRecord) {
             </option>
           </select>
         </label>
-        <button class="btn-text" :disabled="busyId === r.id" @click="skipPerItem(r)">
-          略過，只記住店家
+        <div class="actions">
+          <button class="btn-primary" :disabled="busyId === r.id" @click="resolve(r, false)">
+            完成並確認
+          </button>
+          <button class="btn-text" :disabled="busyId === r.id" @click="resolve(r, true, true)">
+            略過，只記住店家（並確認）
+          </button>
+        </div>
+      </div>
+
+      <div v-else class="actions">
+        <button class="btn-primary" :disabled="busyId === r.id" @click="resolve(r, false)">
+          確認（目前為 {{ categoryName(draftOf(r) || null) }}）
+        </button>
+        <button
+          class="btn-text"
+          :disabled="busyId === r.id || !draftOf(r)"
+          @click="resolve(r, true)"
+        >
+          確認並記住規則
         </button>
       </div>
 
       <div class="actions">
-        <button class="btn-primary" :disabled="busyId === r.id" @click="confirm(r)">
-          確認（目前為 {{ categoryName(r.categoryId) }}）
-        </button>
         <button
           v-if="confirmingDelete !== r.id"
           class="btn-text"

@@ -86,20 +86,22 @@ export async function bumpHits(tx: Tx, ruleIds: string[], now: number): Promise<
   }
 }
 
-export async function applyCorrection(
-  storage: StoragePort,
-  plan: CorrectionPlan,
-): Promise<Rule | null> {
+/** transaction 內套用修正計畫。確認並記住（B4.2a）要和紀錄在同一個 transaction 寫入。 */
+export async function writeCorrection(tx: Tx, plan: CorrectionPlan): Promise<Rule | null> {
   if (plan.kind === 'create') {
-    await storage.put('rules', plan.rule)
+    await tx.put('rules', plan.rule)
     return plan.rule
   }
   if (plan.kind === 'update') {
-    const rule = await storage.get<Rule>('rules', plan.ruleId)
+    const rule = await tx.get<Rule>('rules', plan.ruleId)
     if (!rule) return null
     const next: Rule = { ...rule, categoryId: plan.categoryId, updatedAt: plan.updatedAt }
-    await storage.put('rules', next)
+    await tx.put('rules', next)
     return next
   }
   return null
+}
+
+export function applyCorrection(storage: StoragePort, plan: CorrectionPlan): Promise<Rule | null> {
+  return storage.transaction(['rules'], (tx) => writeCorrection(tx, plan))
 }

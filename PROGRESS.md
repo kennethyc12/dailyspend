@@ -403,13 +403,19 @@ v1 的程式寫完了。接下來最有價值的不是寫功能，是**讓真實
 | **C2a** ✅ | 載具匯入的 service 層：`prepareCarrierImport`（新增／合併／已存在／可能重複／無法匯入）、`planWrites`、`commitCarrierImport`（單一 transaction、過期檢查）；`mergeForWrite` 讓合併後重算 `invoiceKey`；抽出 `loadClassifier`、`applyClassification`、`bumpHits` | 匯入不走 `saveRecord`（使用者 2026-10-14 同意，偏離 design.md §7.3 末段），只共用 `mergeForWrite` |
 | **C2b** ✅ | 載具匯入的畫面：備份頁「匯入載具 CSV」（選檔 → 預覽 → 逐筆選擇可能重複 → 確認）、寫入後 `initStorage`／`prepareFiles`／`refreshRecords`；文件同步（design.md §1、§3.1、§7.1–§7.3、§9、§11、§11.3、§16，FEATURES，README） | 2026-10-14 真機驗收 12 項全過 |
 | **B4.1** ✅ | 狀態型原因（`missing_merchant`、`missing_invoice_date`）在 `prepareRecord` 補好就解除，`correctCategory` 也經過它；合併經過 `mergeForWrite` 一併解除；「確認」維持清空全部原因（Q4）；不做遷移（Q3）；規則見 design.md §3.7 | ~~要先決定哪些原因可自動解除~~（已決定，見 DECISIONS〈B4.1 research 後〉）。交接：已存成「有表頭沒品項」的紀錄仍帶著 `recognition_failed`，它是事件型，由「確認」清掉。~~另外 `carrierImportService.planInsert` 也會加 `missing_merchant`（第三個產生點，另兩個在 `quickInput.ts`、`invoiceService.ts`），統一時要一起收~~（B4.1 Q1 A：產生點維持三處，解除統一在 `prepareRecord`）。一次性例外：B4.1 之前就帶著過時 `missing_merchant` 的紀錄，上線後第一次重新匯入同一份 CSV 會判成「合併」（原因被解除），之後回到「已存在」 |
-| **B4.2** | U1 待確認卡缺欄位：design.md §10 要求原始輸入、照片縮圖、可直接編輯、「確認並記住規則」，`PendingView` 都沒有 | 待確認頁的 UI 改動，需要自己的 research |
+| **B4.2a** | 待確認卡的「確認」與「確認並記住規則」：類別改草稿、`resolvePending` 單一 transaction 寫入規則與紀錄、多品項按「記住」才展開逐項面板（修掉改分類後卡片連同面板消失的 bug） | 偏離 design.md §6.2「修正即成規則」與 §10〈實作〉，使用者同意；編輯頁維持選了就學 |
+| **B4.2b** | 待確認卡的原始輸入、照片縮圖、就地編輯欄位（research.md B4.2〈chris-dev 審閱與決定〉Q2、Q3、Q5） | 「來源：載具匯入」是 §10 以外的新 UI，要先問使用者；拆 `updateRecordFields` 算／寫 |
 | **B5** | 錯誤處理分工（業務結果走回傳值，非預期錯誤交全域） | 動到每個 view，靠 B1 的頁面測試當安全網；錯誤紀錄寫進 IndexedDB 延後 |
 | **B6** | 分析：門檻下限、佐證紀錄看得到 | — |
 | **B7** | 架構清理：`initStorage` 單一入口、重複文案、沒在用的 port 與設定項 | 刪 `RuleClassifier`／`ClassifierPort` 偏離 design.md §6.4，要先取得同意；`invoiceKey.ts` 自己的日期 regex（有 capture group）和 `dates.ts` 的 `ISO_DATE` 重複，評估能否共用 |
 | **B8** | 文件同步 | FEATURES.md:76「共 10 種」待確認原因（現在 11 種）、文件裡的測試數、design.md §3.7／§4.4 的新規則、「單價語意未定」的舊說法（FEATURES.md、`einvoicePayload.ts`、`invoiceService.ts`、`QuickInputView.vue:278-280`）、本文件「開發指令」的 CI 流程漏了 lint；編碼相關的舊說法：`FEATURES.md:136`「品項編碼已由實拍樣本確認是 UTF-8」、`design.md` §5.2.2「品項的編碼是 Base64 還是 Big5」、`design.md` §12〈#1 樣本可以延後到 Phase 9〉表格「QR 原始文字」那一列（還寫著「品項編碼…⏳ 仍缺」）、`qrDetect.ts:12` 的註解漏了 UTF-8 |
 
-另外九張 ticket：
+另外十四張 ticket：
+- `multi_item_correction` 沒有產生點（design.md §6.2「略過」要記它）。P2，之後再評估實作（使用者 2026-10-14 決定，不刪）。卡點：待確認頁的「略過，只記住店家」會直接確認，這個事件型原因加上去會讓剛確認的紀錄立刻回到待確認；要實作得先想清楚它出現在哪裡（例如編輯頁的略過，或另一種不會進待確認的標記）。觸發點：使用者想回頭找「整筆改過分類的多品項紀錄」
+- §6.2 的 undo 沒做（B4.2a 正式承認不一致，目前只有提示文字）。觸發點：使用者回報誤記規則要去設定頁刪很麻煩
+- 編輯頁返回連結寫死 `/records`（`RecordEditView.vue`），從其他頁進來回不去。觸發點：B4.2b 或任何頁面要連到編輯頁時
+- 改日期後 `invoiceKey` 撞到另一筆時，`updateRecordFields` 丟 `StorageConflictError`、不合併（`saveRecord` 有 catch 後合併，編輯沒有）。B4.2b 讓錯誤訊息講清楚，合併另議
+- 待確認卡依原因聚焦欄位（design.md §3.7「不同 reason 對應不同的修正欄位聚焦」）。觸發點：B4.2b 之後覺得找欄位麻煩
 - `rawRecognition` 只存解析後的結果，parser 有 bug 時事後救不回來。要不要另存原始 payload
 - `entryService.test.ts:85` 在台北時間 00:00–08:00 必定失敗（見「坑」第 9 點）
 - 依規格把左右 QR 串接後再解析（含 Base64 模式，編碼參數 2）：規格上左右 QR 是一段連續的內容，現在左右分開切三元組，斷點不在品項邊界時會漏品項。P3，目前 0 筆實例。觸發點：第一次遇到參數 2，或合規發票出現「湊不成」note。官方範例 payload 的測試併在這裡做。境外電商（參數 3）在參數之後多兩個 10 碼金額欄位，會讓品項三元組錯位，一併在這裡評估

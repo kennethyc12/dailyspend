@@ -10,6 +10,7 @@ import {
   deleteRecord,
   getRecord,
   merchantDictionary,
+  resolvePending,
   updateRecordFields,
   ValidationError,
 } from '../entryService'
@@ -168,6 +169,145 @@ describe('修正分類（§6.2 在真實流程中）', () => {
     const learned = rules.filter((x) => x.origin === 'userCorrection')
     expect(learned).toHaveLength(1)
     expect(learned[0]).toMatchObject({ type: 'merchant', pattern: '某店' })
+  })
+})
+
+describe('待確認的確認與記住規則（B4.2a）', () => {
+  const learnedRules = async () =>
+    (await storage.getAll<Rule>('rules')).filter((r) => r.origin === 'userCorrection')
+
+  it('確認：套用類別、清掉原因，不建規則', async () => {
+    await createFromText(storage, '某店 320', NOW)
+    const out = await resolvePending(storage, await only(), {
+      categoryId: 'fun',
+      remember: false,
+      now: NOW + 1,
+    })
+
+    expect(out.kind).toBe('confirmed')
+    const r = await only()
+    expect(r).toMatchObject({
+      status: 'confirmed',
+      categoryId: 'fun',
+      categorySource: 'user',
+      pendingReasons: [],
+    })
+    expect(await learnedRules()).toHaveLength(0)
+  })
+
+  it('確認並記住：沒有品項 → 店家規則', async () => {
+    await createFromText(storage, '某店 320', NOW)
+    const out = await resolvePending(storage, await only(), { categoryId: 'fun', remember: true })
+
+    expect(out.kind === 'confirmed' && out.learned).toMatchObject({
+      type: 'merchant',
+      pattern: '某店',
+      categoryId: 'fun',
+    })
+    expect((await only()).status).toBe('confirmed')
+    expect(await learnedRules()).toHaveLength(1)
+  })
+
+  it('確認並記住：一個品項 → 品項規則', async () => {
+    await createFromText(storage, '某店 不明物 320', NOW)
+    const out = await resolvePending(storage, await only(), { categoryId: 'fun', remember: true })
+
+    expect(out.kind === 'confirmed' && out.learned).toMatchObject({
+      type: 'itemKeyword',
+      pattern: '不明物',
+    })
+  })
+
+  it('確認並記住：多個品項 → needs_per_item，什麼都不寫', async () => {
+    await createFromText(storage, '某店 甲甲 乙乙 100', NOW)
+    const before = await only()
+    const out = await resolvePending(storage, before, { categoryId: 'fun', remember: true })
+
+    expect(out).toEqual({ kind: 'needs_per_item', itemNames: ['甲甲', '乙乙'] })
+    expect(await only()).toEqual(before)
+    expect(await learnedRules()).toHaveLength(0)
+  })
+
+  it('多個品項略過逐項指定 → 店家規則並確認', async () => {
+    await createFromText(storage, '某店 甲甲 乙乙 100', NOW)
+    const out = await resolvePending(storage, await only(), {
+      categoryId: 'fun',
+      remember: true,
+      skipPerItem: true,
+    })
+
+    expect(out.kind === 'confirmed' && out.learned).toMatchObject({
+      type: 'merchant',
+      pattern: '某店',
+    })
+    expect((await only()).status).toBe('confirmed')
+  })
+
+  it('沒有店家也沒有品項：沒東西可記，照樣確認', async () => {
+    await createFromText(storage, '320', NOW)
+    expect((await only()).pendingReasons).toContain('missing_merchant')
+
+    const out = await resolvePending(storage, await only(), { categoryId: 'fun', remember: true })
+
+    expect(out.kind === 'confirmed' && out.learned).toBeNull()
+    expect(await only()).toMatchObject({ status: 'confirmed', pendingReasons: [] })
+    expect(await learnedRules()).toHaveLength(0)
+  })
+
+  it('類別沒改就確認：維持規則判斷的來源與信心', async () => {
+    await createFromText(storage, '全家 咖啡 55 麵包', NOW)
+    const before = await only()
+    expect(before.categoryId).toBe('drink')
+
+    await resolvePending(storage, before, { categoryId: 'drink', remember: false })
+
+    expect(await only()).toMatchObject({
+      status: 'confirmed',
+      categoryId: 'drink',
+      categorySource: 'rule',
+      classifyConfidence: before.classifyConfidence,
+    })
+  })
+
+  it('記住但沒有類別 → ValidationError，資料不變', async () => {
+    await createFromText(storage, '某店 320', NOW)
+    const before = await only()
+
+    await expect(
+      resolvePending(storage, before, { categoryId: null, remember: true }),
+    ).rejects.toBeInstanceOf(ValidationError)
+    expect(await only()).toEqual(before)
+  })
+
+  it('規則與紀錄同一個 transaction：紀錄寫入失敗時規則也不留', async () => {
+    await createFromText(storage, '某店 320', NOW)
+    const pending = await only()
+    await storage.put('records', { ...pending, id: 'other', invoiceKey: 'K' })
+    // 業務上不會發生：故意讓紀錄撞 unique index，模擬寫入失敗
+    const colliding: SpendRecord = { ...pending, invoiceKey: 'K' }
+
+    await expect(
+      resolvePending(storage, colliding, { categoryId: 'fun', remember: true }),
+    ).rejects.toThrow()
+
+    expect(await learnedRules()).toHaveLength(0)
+    expect(await getRecord(storage, pending.id)).toEqual(pending)
+  })
+
+  it('確認不經過 prepareRecord：日期壞掉的發票也清空原因', async () => {
+    await createFromText(storage, '某店 320', NOW)
+    const broken: SpendRecord = {
+      ...(await only()),
+      date: '2026-13-40',
+      invoiceNumber: 'AB12345678',
+      pendingReasons: ['missing_invoice_date'],
+      status: 'pending',
+    }
+    await storage.put('records', broken)
+
+    await resolvePending(storage, broken, { categoryId: null, remember: false })
+
+    expect(await only()).toMatchObject({ status: 'confirmed', pendingReasons: [] })
   })
 })
 

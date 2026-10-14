@@ -4,7 +4,7 @@ import { parseQuickInput, type BlockingError, type QuickInputParse } from '@/par
 import { classifyWithRules } from '@/classify/ruleClassifier'
 import type { ClassifyInput } from '@/classify/port'
 import { planCorrection, type CorrectionPlan, type CorrectionScope } from '@/classify/correction'
-import { applyCorrection, loadActiveRules, recordHits } from './ruleService'
+import { applyCorrection, loadActiveRules, recordHits, writeCorrection } from './ruleService'
 import { prepareRecord, saveRecord, type SaveOutcome } from './recordService'
 import type { Settings } from '@/models/types'
 import { ISO_DATE, isValidYmd, parseIso } from '@/analysis/dates'
@@ -204,6 +204,69 @@ export async function correctCategory(
   await storage.put('records', prepared)
 
   return { record: prepared, plan }
+}
+
+export interface ResolveOptions {
+  /** 卡片上的草稿類別。null = 沒選，維持紀錄現在的類別。 */
+  categoryId: string | null
+  /** 「確認並記住規則」。 */
+  remember: boolean
+  /** 逐項面板的「略過，只記住店家」。 */
+  skipPerItem?: boolean
+  now?: number
+}
+
+export type ResolveResult =
+  | { kind: 'needs_per_item'; itemNames: string[] }
+  /** learned 為 null 且 remember 為 true：沒有店家或品項可記，只確認。 */
+  | { kind: 'confirmed'; record: SpendRecord; learned: Rule | null }
+
+/**
+ * §10 待確認卡的「確認」與「確認並記住規則」（B4.2a）。
+ * 確認清空全部原因、不經過 prepareRecord（同 confirmRecord，理由見 B4.1）。
+ * 規則與紀錄同一個 transaction：不會出現「規則學了、紀錄還在待確認」。
+ */
+export async function resolvePending(
+  storage: StoragePort,
+  record: SpendRecord,
+  opts: ResolveOptions,
+): Promise<ResolveResult> {
+  const now = opts.now ?? Date.now()
+  const categoryId = opts.categoryId ?? record.categoryId
+  if (opts.remember && categoryId === null) {
+    throw new ValidationError('請先選類別', 'category')
+  }
+
+  let plan: CorrectionPlan | null = null
+  if (opts.remember && categoryId !== null) {
+    plan = planCorrection({
+      merchant: record.merchant || null,
+      items: record.items,
+      targetCategoryId: categoryId,
+      scope: { kind: 'record' },
+      skipPerItem: opts.skipPerItem,
+      existingRules: await storage.getAll<Rule>('rules'),
+      now,
+    })
+    if (plan.kind === 'needs_per_item') return plan
+  }
+
+  // 只有類別真的改了才算使用者指定；確認規則猜的結果不改來源
+  const changed = categoryId !== record.categoryId
+  const next: SpendRecord = {
+    ...record,
+    ...(changed ? { categoryId, categorySource: 'user' as const, classifyConfidence: 1 } : {}),
+    pendingReasons: [],
+    status: 'confirmed',
+    updatedAt: now,
+  }
+
+  const learned = await storage.transaction(['rules', 'records'], async (tx) => {
+    const rule = plan ? await writeCorrection(tx, plan) : null
+    await tx.put('records', next)
+    return rule
+  })
+  return { kind: 'confirmed', record: next, learned }
 }
 
 /** §10 的「確認」：使用者看過了，清掉所有待確認原因。 */
