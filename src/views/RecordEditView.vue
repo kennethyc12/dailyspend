@@ -12,8 +12,14 @@ import {
   removePhoto,
   updateRecordFields,
 } from '@/services/entryService'
-import { userMessage } from '@/errors/userMessage'
-import { formFrom, formToPatch, isDirty, type RecordForm } from '@/views/recordForm'
+import { handleError } from '@/errors/handleError'
+import {
+  DATE_CONFLICT,
+  formFrom,
+  formToPatch,
+  isDirty,
+  type RecordForm,
+} from '@/views/recordForm'
 import { usePhotoPicker } from '@/composables/usePhotoPicker'
 import { activeCategories, categoryName, refreshRecords } from '@/composables/useRecords'
 import { initStorage } from '@/composables/useStorageStatus'
@@ -60,7 +66,7 @@ onMounted(async () => {
       if (existing) picker.showPreview(existing.blob)
     }
   } catch (err) {
-    errorMsg.value = (err as Error).message
+    errorMsg.value = handleError(err, { where: 'RecordEditView.load', failed: '讀取失敗' })
   } finally {
     loading.value = false
   }
@@ -74,7 +80,11 @@ async function act(fn: () => Promise<void>) {
     await fn()
     await refreshRecords()
   } catch (err) {
-    errorMsg.value = userMessage(err)
+    errorMsg.value = handleError(err, {
+      where: 'RecordEditView.act',
+      failed: '操作失敗',
+      conflict: DATE_CONFLICT,
+    })
   } finally {
     saving.value = false
   }

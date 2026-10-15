@@ -2,6 +2,7 @@ import { onUnmounted, ref, shallowRef } from 'vue'
 import type { Photo, Settings } from '@/models/types'
 import { getStorage } from '@/storage'
 import { compressPhoto } from '@/photo/compress'
+import { handleError } from '@/errors/handleError'
 
 /**
  * 從檔案輸入拿到照片、壓縮、並管理預覽用的 object URL。
@@ -44,7 +45,7 @@ export function usePhotoPicker() {
       showPreview(result.blob)
       return result
     } catch (e) {
-      error.value = `照片處理失敗：${(e as Error).message}`
+      error.value = handleError(e, { where: 'usePhotoPicker.pick', failed: '照片處理失敗' })
       return null
     } finally {
       working.value = false

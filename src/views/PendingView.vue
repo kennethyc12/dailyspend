@@ -15,8 +15,8 @@ import {
   learnItemRule,
   resolvePending,
 } from '@/services/entryService'
-import { userMessage } from '@/errors/userMessage'
-import { formFrom, formToPatch, type RecordForm } from '@/views/recordForm'
+import { handleError } from '@/errors/handleError'
+import { DATE_CONFLICT, formFrom, formToPatch, type RecordForm } from '@/views/recordForm'
 
 interface Edit {
   record: SpendRecord
@@ -128,7 +128,11 @@ async function run(id: string, fn: () => Promise<void>) {
     await fn()
     await refreshRecords()
   } catch (err) {
-    errorMsg.value = `操作失敗：${userMessage(err)}`
+    errorMsg.value = handleError(err, {
+      where: 'PendingView.run',
+      failed: '操作失敗',
+      conflict: DATE_CONFLICT,
+    })
   } finally {
     busyId.value = null
   }

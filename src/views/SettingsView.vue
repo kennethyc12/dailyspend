@@ -238,7 +238,7 @@ function mb(bytes: number) {
         <dt>儲存已持久化</dt>
         <dd :class="persistGranted ? 'ok' : 'warn'">{{ persistGranted ? '是' : '否' }}</dd>
 
-        <dt>未處理錯誤</dt>
+        <dt>非預期錯誤</dt>
         <dd :class="errors.length ? 'warn' : 'ok'">{{ errors.length }} 筆</dd>
 
         <dt>用量</dt>
@@ -255,9 +255,9 @@ function mb(bytes: number) {
     </section>
 
     <section v-if="errors.length" class="panel">
-      <h2>未處理的錯誤</h2>
+      <h2>非預期的錯誤</h2>
       <p class="hint">
-        這些是沒被畫面攔下的錯誤。iPhone 上看不到 console，所以留在這裡供除錯。
+        這些是非預期的錯誤，包括畫面接住、但不是操作或資料本身造成的。iPhone 上看不到 console，所以留在這裡供除錯。
       </p>
       <ul class="list">
         <li v-for="e in errors" :key="e.id">

@@ -11,6 +11,7 @@ import { detectQrCodes, warmUp } from '@/recognize/qrDetect'
 import { parseEInvoicePayload, type RecognizedInvoice } from '@/recognize/einvoicePayload'
 import { todayIso } from '@/parsing/quickInput'
 import type { SpendRecord } from '@/models/types'
+import { handleError } from '@/errors/handleError'
 
 const storage = getStorage()
 const { records } = useRecords()
@@ -89,7 +90,7 @@ async function submit() {
     await refreshRecords()
   } catch (err) {
     // 吞掉錯誤會讓使用者看到「按鈕沒反應」，這是 Phase 6 踩過的坑。
-    errorMsg.value = `存檔失敗：${(err as Error).message}`
+    errorMsg.value = handleError(err, { where: 'QuickInputView.submit', failed: '存檔失敗' })
   } finally {
     saving.value = false
   }
@@ -134,7 +135,9 @@ async function onPickPhoto(event: Event) {
     }
     invoice.value = parsed
   } catch (err) {
-    readMsg.value = [`讀取發票失敗：${(err as Error).message}`]
+    readMsg.value = [
+      handleError(err, { where: 'QuickInputView.onPickPhoto', failed: '讀取發票失敗' }),
+    ]
   } finally {
     reading.value = false
   }
@@ -172,7 +175,7 @@ async function submitInvoice() {
     dropPhoto()
     await refreshRecords()
   } catch (err) {
-    errorMsg.value = `存檔失敗：${(err as Error).message}`
+    errorMsg.value = handleError(err, { where: 'QuickInputView.submitInvoice', failed: '存檔失敗' })
   } finally {
     saving.value = false
   }
@@ -192,7 +195,7 @@ async function submitSample() {
     dropPhoto()
     sampleMsg.value = '已存成發票樣本，可在設定頁查看或刪除。'
   } catch (err) {
-    errorMsg.value = `樣本存檔失敗：${(err as Error).message}`
+    errorMsg.value = handleError(err, { where: 'QuickInputView.submitSample', failed: '樣本存檔失敗' })
   } finally {
     saving.value = false
   }

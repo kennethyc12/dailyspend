@@ -7,7 +7,7 @@ const { latest } = useErrorLog()
 <template>
   <div v-if="latest" class="banner" role="alert">
     <div class="text">
-      <strong>發生未處理的錯誤</strong>
+      <strong>發生非預期的錯誤</strong>
       <span>{{ latest.message }}</span>
       <RouterLink to="/settings" class="more" @click="dismissLatest()">查看詳情</RouterLink>
     </div>

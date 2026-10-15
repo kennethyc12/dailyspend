@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import type { DOMWrapper, VueWrapper } from '@vue/test-utils'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SpendRecord } from '@/models/types'
 import RecordEditView from '@/views/RecordEditView.vue'
 import { createFromText } from '@/services/entryService'
@@ -18,12 +18,17 @@ import {
   useViewTest,
   waitForText,
 } from '@/test/mountView'
+import { clearErrors, useErrorLog } from '@/errors/errorLog'
 
 vi.mock('@/photo/compress', () => ({
   compressPhoto: vi.fn(),
 }))
 
 const { storage } = useViewTest()
+
+beforeEach(() => {
+  vi.mocked(compressPhoto).mockReset()
+})
 
 async function openEditor(id: string) {
   const wrapper = await mountView(RecordEditView, `/records/${id}`)
@@ -259,5 +264,37 @@ describe('編輯紀錄：其他動作不會蓋掉還沒存的修改（#3）', ()
     const after = await storage().get<SpendRecord>('records', id)
     expect(after!.photoId).toBeNull()
     expect(after!.amount).toBe(99)
+  })
+})
+
+describe('編輯紀錄：錯誤處理分工（B5a）', () => {
+  it('照片處理失敗是非預期錯誤：說明情境並記下錯誤，照片不變', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    vi.mocked(compressPhoto).mockRejectedValueOnce(new Error('解不開'))
+    const before = await textRecord('全家 咖啡 55')
+    const wrapper = await openEditor(before.id)
+
+    const album = wrapper.findAll<HTMLInputElement>('input[type="file"]').find((i) => !i.attributes('capture'))!
+    await pickFile(album, new File(['x'], 'bad.jpg', { type: 'image/jpeg' }))
+    await waitForText(wrapper, '照片處理失敗。已記錄錯誤，可到設定頁的「非預期的錯誤」查看')
+
+    expect(wrapper.text()).not.toContain('解不開')
+    const { errors } = useErrorLog()
+    expect(errors.value).toHaveLength(1)
+    expect(errors.value[0]).toMatchObject({ message: '解不開', where: 'usePhotoPicker.pick' })
+    expect((await storage().get<SpendRecord>('records', before.id))!.photoId).toBeNull()
+    clearErrors()
+  })
+
+  it('金額空白是預期錯誤：說明原因，不記錯誤', async () => {
+    const before = await textRecord('全家 咖啡 55')
+    const wrapper = await openEditor(before.id)
+
+    await field(wrapper, '金額').setValue('')
+    await button(wrapper, '儲存').trigger('click')
+    await settled(wrapper)
+
+    expect(wrapper.text()).toContain('操作失敗：金額不能空白')
+    expect(useErrorLog().errors.value).toEqual([])
   })
 })

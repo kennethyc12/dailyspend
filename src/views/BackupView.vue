@@ -2,7 +2,7 @@
 import { computed, onMounted, ref, shallowRef } from 'vue'
 import { getStorage } from '@/storage'
 import { saveFile, type SaveOutcome } from '@/backup/share'
-import { BackupFormatError } from '@/backup/backup'
+import { handleError } from '@/errors/handleError'
 import {
   buildBackupFile,
   buildCsvFile,
@@ -112,18 +112,13 @@ const lastBackupText = computed(() => {
   return at ? new Date(at).toLocaleString('zh-TW') : '從未備份'
 })
 
-function fail(prefix: string, err: unknown) {
-  errorMsg.value =
-    err instanceof BackupFormatError ? err.message : `${prefix}：${(err as Error).message}`
-}
-
 async function prepareFiles() {
   preparing.value = true
   try {
     csvFile.value = await buildCsvFile(storage)
     backupFile.value = await buildBackupFile(storage)
   } catch (err) {
-    fail('準備檔案失敗', err)
+    errorMsg.value = handleError(err, { where: 'BackupView.prepareFiles', failed: '準備檔案失敗' })
   } finally {
     preparing.value = false
   }
@@ -142,7 +137,7 @@ async function exportCsv() {
   try {
     message.value = describe(await saveFile(csvFile.value), 'CSV')
   } catch (err) {
-    fail('匯出失敗', err)
+    errorMsg.value = handleError(err, { where: 'BackupView.exportCsv', failed: '匯出失敗' })
   }
 }
 
@@ -157,7 +152,7 @@ async function exportBackup() {
       await initStorage()
     }
   } catch (err) {
-    fail('備份失敗', err)
+    errorMsg.value = handleError(err, { where: 'BackupView.exportBackup', failed: '備份失敗' })
   }
 }
 
@@ -190,7 +185,7 @@ async function onPickImportFile(e: Event) {
     importParsed.value = parsed
     await preparePreview(parsed)
   } catch (err) {
-    fail('讀取失敗', err)
+    errorMsg.value = handleError(err, { where: 'BackupView.onPickImportFile', failed: '讀取失敗' })
   } finally {
     input.value = ''
     importing.value = false
@@ -223,13 +218,13 @@ async function confirmImport() {
     try {
       plan = await commitCarrierImport(storage, preview, importChoices.value)
     } catch (err) {
-      if (err instanceof CarrierImportStaleError) {
-        errorMsg.value = err.message
-        importStale.value = true
-        return
-      }
+      // 讓「重新預覽」出現；文案的分類只在 handleError
+      if (err instanceof CarrierImportStaleError) importStale.value = true
       // 單一 transaction：只有 commit 本身失敗時「資料未變更」才成立。
-      fail('匯入失敗，資料未變更', err)
+      errorMsg.value = handleError(err, {
+        where: 'BackupView.confirmImport.commit',
+        failed: '匯入失敗，資料未變更',
+      })
       return
     }
     clearImport()
@@ -244,7 +239,10 @@ async function confirmImport() {
     await refreshRecords()
     message.value = summary
   } catch (err) {
-    fail('匯入已完成，但更新畫面失敗', err)
+    errorMsg.value = handleError(err, {
+      where: 'BackupView.confirmImport.refresh',
+      failed: '匯入已完成，但更新畫面失敗',
+    })
   } finally {
     importing.value = false
   }
@@ -258,7 +256,7 @@ async function repreview() {
     await preparePreview(importParsed.value)
     message.value = '資料有變動，已重新預覽，請重新選擇'
   } catch (err) {
-    fail('重新預覽失敗', err)
+    errorMsg.value = handleError(err, { where: 'BackupView.repreview', failed: '重新預覽失敗' })
   } finally {
     importing.value = false
   }
@@ -276,8 +274,7 @@ async function onPickRestoreFile(e: Event) {
     restorePreview.value = await prepareRestore(storage, file)
   } catch (err) {
     restorePreview.value = null
-    errorMsg.value =
-      err instanceof BackupFormatError ? err.message : `讀取失敗：${(err as Error).message}`
+    errorMsg.value = handleError(err, { where: 'BackupView.onPickRestoreFile', failed: '讀取失敗' })
   } finally {
     ;(e.target as HTMLInputElement).value = ''
   }
@@ -290,7 +287,10 @@ async function downloadSafety() {
     const outcome = await saveFile(restorePreview.value.safetyBackup)
     if (outcome !== 'cancelled') safetyDelivered.value = true
   } catch (err) {
-    fail('保險備份匯出失敗', err)
+    errorMsg.value = handleError(err, {
+      where: 'BackupView.downloadSafety',
+      failed: '保險備份匯出失敗',
+    })
   }
 }
 
@@ -306,7 +306,11 @@ async function confirmRestore() {
       await commitRestore(storage, preview)
     } catch (err) {
       // 還原是整個 App 最危險的操作，絕不能無聲失敗。transaction 失敗會整批回滾，所以這句話才成立。
-      fail('還原失敗，資料未變更', err)
+      errorMsg.value = handleError(err, {
+        where: 'BackupView.confirmRestore.commit',
+        failed: '還原失敗，資料未變更',
+        conflict: '備份檔裡有兩筆紀錄是同一張發票',
+      })
       return
     }
     restorePreview.value = null

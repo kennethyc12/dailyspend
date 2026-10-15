@@ -69,7 +69,7 @@ Service worker 需要 HTTPS，所以「Mac 跑 dev server + 手機連區網 IP�
 
 除錯用 Mac Safari 的「開發」選單遠端連 iPhone（手機需開啟 設定 › Safari › 進階 › 網頁檢閱器）。
 
-App 內的錯誤紀錄在「設定 › 未處理的錯誤」。
+App 內的錯誤紀錄在「設定 › 非預期的錯誤」。
 
 ## 專案結構
 

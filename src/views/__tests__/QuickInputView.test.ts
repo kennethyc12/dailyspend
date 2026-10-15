@@ -7,6 +7,7 @@ import { compressPhoto } from '@/photo/compress'
 import { detectQrCodes, type DetectResult } from '@/recognize/qrDetect'
 import { leftQr, photoFromFile, REAL_B_RIGHT } from '@/test/fixtures'
 import { button, field, mountView, pickFile, settled, useViewTest, waitForText } from '@/test/mountView'
+import { clearErrors, useErrorLog } from '@/errors/errorLog'
 
 vi.mock('@/recognize/qrDetect', () => ({
   detectQrCodes: vi.fn(),
@@ -229,3 +230,27 @@ describe('記一筆：讀到發票之後的狀態（D1、#12b、#5）', () => {
   })
 })
 
+describe('記一筆：非預期錯誤（B5a）', () => {
+  it('存檔時資料寫不進去：說明情境並記下錯誤，不顯示原文', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    // 函式無法 structured clone，寫入照片時會丟 DataCloneError
+    vi.mocked(compressPhoto).mockImplementation(async (f) => ({ ...photoFromFile(f), broken: () => 0 }))
+    vi.mocked(detectQrCodes).mockResolvedValue(detected())
+
+    const wrapper = await mountView(QuickInputView)
+    await settled(wrapper)
+    await wrapper.find('input.entry').setValue('某店 320')
+    await pickFile(albumInput(wrapper), file('a.jpg'))
+    await waitForText(wrapper, '讀不到 QR')
+    await settled(wrapper)
+    await button(wrapper, '存檔').trigger('click')
+    await waitForText(wrapper, '存檔失敗。已記錄錯誤，可到設定頁的「非預期的錯誤」查看')
+
+    expect(wrapper.text()).not.toContain('structured clone')
+    const { errors } = useErrorLog()
+    expect(errors.value).toHaveLength(1)
+    expect(errors.value[0]).toMatchObject({ source: 'manual', where: 'QuickInputView.submit' })
+    expect(await storage().count('records')).toBe(0)
+    clearErrors()
+  })
+})

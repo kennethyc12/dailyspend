@@ -1,6 +1,9 @@
 import type { SpendRecord } from '@/models/types'
 import { ValidationError, type RecordPatch } from '@/services/entryService'
 
+export const DATE_CONFLICT =
+  '改了日期後，這筆和另一張同號碼的發票重複，無法存檔。請改回原日期，或到紀錄頁處理另一筆'
+
 // 發票的品名可以含空白，所以一行一個品項，不用空白分隔
 export const ITEM_SEPARATOR = '\n'
 

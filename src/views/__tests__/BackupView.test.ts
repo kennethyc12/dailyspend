@@ -62,7 +62,7 @@ describe('備份與還原', () => {
     const wrapper = await mountView(BackupView, '/backup')
     await pickFile(wrapper.find<HTMLInputElement>('input[accept=".zip,application/zip"]'), broken)
 
-    await waitForText(wrapper, '備份檔缺少 records 清單')
+    await waitForText(wrapper, '讀取失敗：備份檔缺少 records 清單')
     expect(await storage().count('records')).toBe(2)
   })
 
@@ -81,6 +81,23 @@ describe('備份與還原', () => {
     await waitForText(wrapper, '還原失敗，資料未變更')
     const merchants = (await storage().getAll<SpendRecord>('records')).map((r) => r.merchant).sort()
     expect(merchants).toEqual(['全家', '全聯'])
+  })
+})
+
+describe('還原：錯誤處理分工（B5a）', () => {
+  it('備份檔裡有重複的發票：說明原因，不顯示原文、不記錯誤', async () => {
+    await createFromText(storage(), '全家 咖啡 55')
+    const wrapper = await mountView(BackupView, '/backup')
+    await pickFile(wrapper.find<HTMLInputElement>('input[accept=".zip,application/zip"]'), conflictingBackup())
+    await waitForText(wrapper, '② 確認覆寫並還原')
+    await button(wrapper, '① 先存下目前資料的保險備份').trigger('click')
+    await waitForText(wrapper, '已存下保險備份')
+    await button(wrapper, '② 確認覆寫並還原').trigger('click')
+
+    await waitForText(wrapper, '還原失敗，資料未變更：備份檔裡有兩筆紀錄是同一張發票')
+    expect(wrapper.find('.result.warn').text()).toBe(
+      '還原失敗，資料未變更：備份檔裡有兩筆紀錄是同一張發票',
+    )
   })
 })
 

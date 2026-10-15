@@ -9,7 +9,9 @@ import { reportError } from './errorLog'
  * 這層是安全網，不是替代品：能在 handler 裡處理的仍然要在那裡處理，
  * 因為那裡才知道該顯示什麼訊息。
  *
- * iPhone 上沒有 console 可看，所以錯誤要留在 App 裡（設定 › 環境檢查）。
+ * 頁面接住的非預期錯誤由 handleError 回報，這裡只接漏網的。
+ *
+ * iPhone 上沒有 console 可看，所以錯誤要留在 App 裡（設定頁的「非預期的錯誤」）。
  */
 export function installGlobalErrorHandlers(app: App) {
   app.config.errorHandler = (err, instance, info) => {
