@@ -1,14 +1,16 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { IDBFactory } from 'fake-indexeddb'
 import type { Rule, SpendRecord } from '@/models/types'
-import { IndexedDbAdapter, seed } from '@/storage'
+import { IndexedDbAdapter, seed, StorageConflictError } from '@/storage'
 import { loadActiveRules, seedBuiltinRules } from '@/services/ruleService'
 import {
+  computeRecordUpdate,
   confirmRecord,
   correctCategory,
   createFromText,
   deleteRecord,
   getRecord,
+  learnItemRule,
   merchantDictionary,
   resolvePending,
   updateRecordFields,
@@ -25,6 +27,12 @@ beforeEach(async () => {
   await seed(storage)
   await seedBuiltinRules(storage, NOW)
 })
+
+async function ruleFor(pattern: string): Promise<Rule> {
+  const found = (await storage.getAll<Rule>('rules')).find((r) => r.pattern === pattern)
+  if (!found) throw new Error(`找不到規則「${pattern}」`)
+  return found
+}
 
 async function only(): Promise<SpendRecord> {
   const all = await storage.getAll<SpendRecord>('records')
@@ -417,6 +425,15 @@ describe('編輯既有紀錄', () => {
     expect(next.items[0]?.categoryId).toBe('daily')
   })
 
+  it('改品項重跑分類時累計命中次數', async () => {
+    await createFromText(storage, '全家 咖啡 55', NOW)
+    const before = await ruleFor('衛生紙')
+
+    await updateRecordFields(storage, await only(), { itemNames: ['衛生紙'] }, NOW + 1)
+
+    expect((await ruleFor('衛生紙')).hitCount).toBe(before.hitCount + 1)
+  })
+
   it('使用者指定過的分類不會被重跑的規則蓋掉', async () => {
     await createFromText(storage, '全家 咖啡 55', NOW)
     const { record } = await correctCategory(storage, await only(), 'food')
@@ -470,5 +487,99 @@ describe('編輯既有紀錄', () => {
     const r = await only()
     expect((await getRecord(storage, r.id))?.id).toBe(r.id)
     expect(await getRecord(storage, 'nope')).toBeUndefined()
+  })
+})
+
+describe('就地編輯的 service（B4.2b-2）', () => {
+  it('computeRecordUpdate 只算不寫：重分類結果與命中的規則都回傳，DB 與命中次數不變', async () => {
+    await createFromText(storage, '全家 咖啡 55', NOW)
+    const before = await only()
+    const tissue = await ruleFor('衛生紙')
+
+    const out = await computeRecordUpdate(storage, before, { itemNames: ['衛生紙'] }, { now: NOW + 1 })
+
+    expect(out.record).toMatchObject({ categoryId: 'daily', items: [{ name: '衛生紙' }] })
+    expect(out.matchedRuleIds).toContain(tissue.id)
+    expect(await only()).toEqual(before)
+    expect((await ruleFor('衛生紙')).hitCount).toBe(tissue.hitCount)
+  })
+
+  it('computeRecordUpdate 可以不重分類', async () => {
+    await createFromText(storage, '全家 咖啡 55', NOW)
+
+    const out = await computeRecordUpdate(
+      storage,
+      await only(),
+      { itemNames: ['衛生紙'] },
+      { now: NOW + 1, reclassify: false },
+    )
+
+    expect(out.record.categoryId).toBe('drink')
+    expect(out.matchedRuleIds).toEqual([])
+  })
+
+  it('computeRecordUpdate 補好店家會解除原因，但 DB 仍待確認', async () => {
+    await createFromText(storage, '55', NOW)
+
+    const out = await computeRecordUpdate(storage, await only(), { merchant: '某店' })
+
+    expect(out.record.pendingReasons).not.toContain('missing_merchant')
+    expect((await only()).status).toBe('pending')
+  })
+
+  it('resolvePending 帶 hitRuleIds：確認時累計命中次數', async () => {
+    await createFromText(storage, '某店 320', NOW)
+    const tissue = await ruleFor('衛生紙')
+
+    await resolvePending(storage, await only(), {
+      categoryId: null,
+      remember: false,
+      hitRuleIds: [tissue.id],
+    })
+
+    expect((await ruleFor('衛生紙')).hitCount).toBe(tissue.hitCount + 1)
+    expect((await only()).status).toBe('confirmed')
+  })
+
+  it('resolvePending 紀錄寫入失敗時命中次數也不留', async () => {
+    await createFromText(storage, '某店 320', NOW)
+    const pending = await only()
+    await storage.put('records', { ...pending, id: 'other', invoiceKey: 'K' })
+    const tissue = await ruleFor('衛生紙')
+
+    await expect(
+      resolvePending(storage, { ...pending, invoiceKey: 'K' }, {
+        categoryId: null,
+        remember: false,
+        hitRuleIds: [tissue.id],
+      }),
+    ).rejects.toBeInstanceOf(StorageConflictError)
+
+    expect((await ruleFor('衛生紙')).hitCount).toBe(tissue.hitCount)
+  })
+
+  it('learnItemRule 只學規則、不動紀錄，pattern 是正規化後的品名', async () => {
+    await createFromText(storage, '某店 甲甲 乙乙 100', NOW)
+    const before = await only()
+
+    const rule = await learnItemRule(storage, [{ name: 'ＡＡ' }, { name: '乙乙' }], 0, 'fun')
+
+    expect(rule).toMatchObject({ type: 'itemKeyword', pattern: 'AA', categoryId: 'fun' })
+    expect(await only()).toEqual(before)
+  })
+
+  it('learnItemRule 遇到同名規則回傳更新後的規則', async () => {
+    await learnItemRule(storage, [{ name: '甲甲' }], 0, 'fun')
+
+    const rule = await learnItemRule(storage, [{ name: '甲甲' }], 0, 'daily')
+
+    expect(rule).toMatchObject({ pattern: '甲甲', categoryId: 'daily' })
+  })
+
+  it('learnItemRule 沒有品項可學時回傳 null', async () => {
+    const count = (await storage.getAll<Rule>('rules')).length
+
+    expect(await learnItemRule(storage, [{ name: '甲甲' }], 5, 'fun')).toBeNull()
+    expect(await storage.getAll<Rule>('rules')).toHaveLength(count)
   })
 })

@@ -9,7 +9,19 @@ import {
   refreshRecords,
 } from '@/composables/useRecords'
 import { useThumbnails } from '@/composables/useThumbnails'
-import { correctCategory, deleteRecord, resolvePending } from '@/services/entryService'
+import {
+  computeRecordUpdate,
+  deleteRecord,
+  learnItemRule,
+  resolvePending,
+} from '@/services/entryService'
+import { userMessage } from '@/errors/userMessage'
+import { formFrom, formToPatch, type RecordForm } from '@/views/recordForm'
+
+interface Edit {
+  record: SpendRecord
+  matchedRuleIds: string[]
+}
 
 const storage = getStorage()
 const errorMsg = ref<string | null>(null)
@@ -18,8 +30,14 @@ const busyId = ref<string | null>(null)
 const confirmingDelete = ref<string | null>(null)
 /** 哪幾筆正展開「逐項指定類別」面板（§6.2 多品項不自動學）。 */
 const perItemFor = shallowRef<Set<string>>(new Set())
-/** 卡片上選的類別，按確認才寫入（B4.2a）。沒有草稿就用紀錄現在的類別。 */
+/** 卡片上選的類別，按確認才寫入（B4.2a）。沒有草稿就用 working(r) 的類別。 */
 const drafts = ref<Record<string, string>>({})
+/** 展開中的表單（純字串，可以是深層 ref）。 */
+const forms = ref<Record<string, RecordForm>>({})
+// 預覽紀錄最後要寫進 IndexedDB，深層 ref 會變成 Proxy，structured clone 會拒絕
+const edits = shallowRef<Record<string, Edit>>({})
+/** 逐項面板的品項類別草稿，index 對應 working(r).items。 */
+const itemDrafts = shallowRef<Record<string, (string | null)[]>>({})
 const thumbs = useThumbnails(() => pendingRecords.value.map((r) => r.photoId))
 
 onMounted(refreshRecords)
@@ -45,19 +63,56 @@ function togglePerItem(id: string, on: boolean) {
   perItemFor.value = next
 }
 
+/** 卡片上看到的紀錄：有編輯草稿就是改後的預覽，否則是 DB 的值。 */
+function working(r: SpendRecord): SpendRecord {
+  return edits.value[r.id]?.record ?? r
+}
+
 function draftOf(r: SpendRecord): string {
-  return drafts.value[r.id] ?? r.categoryId ?? ''
+  return drafts.value[r.id] ?? working(r).categoryId ?? ''
 }
 
 function setDraft(id: string, categoryId: string) {
   drafts.value = { ...drafts.value, [id]: categoryId }
 }
 
-function forget(id: string) {
-  const next = { ...drafts.value }
+function without<T>(map: Record<string, T>, id: string): Record<string, T> {
+  const next = { ...map }
   delete next[id]
-  drafts.value = next
+  return next
+}
+
+function forget(id: string) {
+  drafts.value = without(drafts.value, id)
+  forms.value = without(forms.value, id)
+  edits.value = without(edits.value, id)
+  itemDrafts.value = without(itemDrafts.value, id)
   togglePerItem(id, false)
+}
+
+function startEdit(r: SpendRecord) {
+  forms.value = { ...forms.value, [r.id]: formFrom(working(r)) }
+}
+
+function cancelEdit(id: string) {
+  forms.value = without(forms.value, id)
+}
+
+function discardEdit(id: string) {
+  edits.value = without(edits.value, id)
+}
+
+function applyEdit(r: SpendRecord) {
+  const form = forms.value[r.id]
+  if (!form) return
+  return run(r.id, async () => {
+    // DB 現值 + 表單，不串接上一份預覽
+    const out = await computeRecordUpdate(storage, r, formToPatch(form, r), {
+      reclassify: !(r.id in drafts.value),
+    })
+    edits.value = { ...edits.value, [r.id]: out }
+    cancelEdit(r.id)
+  })
 }
 
 function learnedText(pattern: string, categoryId: string): string {
@@ -73,26 +128,48 @@ async function run(id: string, fn: () => Promise<void>) {
     await fn()
     await refreshRecords()
   } catch (err) {
-    errorMsg.value = `操作失敗：${(err as Error).message}`
+    errorMsg.value = `操作失敗：${userMessage(err)}`
   } finally {
     busyId.value = null
   }
 }
 
+function itemDraftOf(r: SpendRecord, index: number): string {
+  return itemDrafts.value[r.id]?.[index] ?? working(r).items[index]?.categoryId ?? ''
+}
+
 function setItemCategory(record: SpendRecord, index: number, categoryId: string) {
   if (!categoryId) return
+  const items = working(record).items
   return run(record.id, async () => {
-    await correctCategory(storage, record, categoryId, { kind: 'item', index })
-    notice.value = learnedText(record.items[index]!.name, categoryId)
+    const rule = await learnItemRule(storage, items, index, categoryId)
+    const next = [...(itemDrafts.value[record.id] ?? items.map((it) => it.categoryId))]
+    next[index] = categoryId
+    itemDrafts.value = { ...itemDrafts.value, [record.id]: next }
+    notice.value = rule
+      ? learnedText(rule.pattern, rule.categoryId)
+      : '這個品項沒辦法記成規則，只套用到這筆'
   })
 }
 
 function resolve(record: SpendRecord, remember: boolean, skipPerItem = false) {
+  const edit = edits.value[record.id]
+  const base = working(record)
+  const items = itemDrafts.value[record.id]
+  const target: SpendRecord = items
+    ? {
+        ...base,
+        items: base.items.map((it, i) => ({ ...it, categoryId: items[i] ?? it.categoryId })),
+      }
+    : base
+  const hasDraft = record.id in drafts.value
   return run(record.id, async () => {
-    const out = await resolvePending(storage, record, {
-      categoryId: draftOf(record) || null,
+    const out = await resolvePending(storage, target, {
+      categoryId: drafts.value[record.id] ?? null,
       remember,
       skipPerItem,
+      // 採用了重分類的結果才算命中；之後又選了類別就不算
+      hitRuleIds: edit && !hasDraft ? edit.matchedRuleIds : [],
     })
     if (out.kind === 'needs_per_item') {
       togglePerItem(record.id, true)
@@ -128,10 +205,13 @@ function remove(record: SpendRecord) {
 
     <section v-for="r in pendingRecords" :key="r.id" class="panel">
       <div class="row">
-        <span class="merchant">{{ r.merchant || '（無店家）' }}</span>
-        <span class="amount">${{ r.amount }}</span>
+        <span class="merchant">{{ working(r).merchant || '（無店家）' }}</span>
+        <span class="amount">${{ working(r).amount }}</span>
       </div>
-      <p class="sub">{{ r.date }} · {{ r.items.map((i) => i.name).join('、') || '無品項' }}</p>
+      <p class="sub">
+        {{ working(r).date }} ·
+        {{ working(r).items.map((i) => i.name).join('、') || '無品項' }}
+      </p>
       <p v-if="r.rawInput" class="raw">原始輸入：{{ r.rawInput }}</p>
       <img
         v-if="r.photoId && thumbs[r.photoId]"
@@ -139,6 +219,67 @@ function remove(record: SpendRecord) {
         alt="發票照片"
         class="thumb"
       />
+
+      <div v-if="edits[r.id]" class="edited">
+        <span class="hint">已修改，按確認才會存</span>
+        <button
+          class="btn-text"
+          :disabled="busyId === r.id || perItemFor.has(r.id)"
+          @click="discardEdit(r.id)"
+        >
+          放棄修改
+        </button>
+      </div>
+
+      <div v-if="forms[r.id]" class="edit-form">
+        <label class="field">
+          <span>日期</span>
+          <input v-model="forms[r.id]!.date" type="date" :disabled="busyId === r.id" />
+        </label>
+        <label class="field">
+          <span>店家</span>
+          <input v-model="forms[r.id]!.merchant" type="text" :disabled="busyId === r.id" />
+        </label>
+        <label class="field">
+          <span>金額</span>
+          <input
+            v-model="forms[r.id]!.amount"
+            type="number"
+            inputmode="numeric"
+            step="1"
+            :disabled="busyId === r.id"
+          />
+        </label>
+        <label class="field">
+          <span>品項</span>
+          <textarea
+            v-model="forms[r.id]!.itemsText"
+            rows="3"
+            placeholder="一行一個品項"
+            :disabled="busyId === r.id"
+          />
+        </label>
+        <label class="field">
+          <span>備註</span>
+          <input v-model="forms[r.id]!.note" type="text" :disabled="busyId === r.id" />
+        </label>
+        <div class="actions">
+          <button class="btn-primary" :disabled="busyId === r.id" @click="applyEdit(r)">
+            完成修改
+          </button>
+          <button class="btn-text" :disabled="busyId === r.id" @click="cancelEdit(r.id)">
+            取消修改
+          </button>
+        </div>
+      </div>
+      <button
+        v-else
+        class="btn-text"
+        :disabled="busyId === r.id || perItemFor.has(r.id)"
+        @click="startEdit(r)"
+      >
+        修改
+      </button>
 
       <ul class="reasons">
         <li v-for="reason in r.pendingReasons" :key="reason">{{ REASON_TEXT[reason] }}</li>
@@ -163,10 +304,10 @@ function remove(record: SpendRecord) {
           這筆有多個品項。整筆改分類不會自動記成規則，否則系統會學到像
           「衛生紙 → 飲食」這種錯規則。要記住的話請逐項指定：
         </p>
-        <label v-for="(item, i) in r.items" :key="i" class="field">
+        <label v-for="(item, i) in working(r).items" :key="i" class="field">
           <span>{{ item.name }}</span>
           <select
-            :value="item.categoryId ?? ''"
+            :value="itemDraftOf(r, i)"
             :disabled="busyId === r.id"
             @change="setItemCategory(r, i, ($event.target as HTMLSelectElement).value)"
           >
@@ -177,22 +318,34 @@ function remove(record: SpendRecord) {
           </select>
         </label>
         <div class="actions">
-          <button class="btn-primary" :disabled="busyId === r.id" @click="resolve(r, false)">
+          <button
+            class="btn-primary"
+            :disabled="busyId === r.id || r.id in forms"
+            @click="resolve(r, false)"
+          >
             完成並確認
           </button>
-          <button class="btn-text" :disabled="busyId === r.id" @click="resolve(r, true, true)">
+          <button
+            class="btn-text"
+            :disabled="busyId === r.id || r.id in forms"
+            @click="resolve(r, true, true)"
+          >
             略過，只記住店家（並確認）
           </button>
         </div>
       </div>
 
       <div v-else class="actions">
-        <button class="btn-primary" :disabled="busyId === r.id" @click="resolve(r, false)">
+        <button
+          class="btn-primary"
+          :disabled="busyId === r.id || r.id in forms"
+          @click="resolve(r, false)"
+        >
           確認（目前為 {{ categoryName(draftOf(r) || null) }}）
         </button>
         <button
           class="btn-text"
-          :disabled="busyId === r.id || !draftOf(r)"
+          :disabled="busyId === r.id || r.id in forms || !draftOf(r)"
           @click="resolve(r, true)"
         >
           確認並記住規則
@@ -255,6 +408,36 @@ function remove(record: SpendRecord) {
   margin-top: var(--space-2);
   border: 1px solid var(--c-border);
   border-radius: 8px;
+}
+
+.edited {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-top: var(--space-2);
+  font-size: 13px;
+}
+
+.edit-form {
+  margin-top: var(--space-3);
+}
+
+.field input,
+.field textarea {
+  flex: 1;
+  max-width: 60%;
+  padding: var(--space-2);
+  border: 1px solid var(--c-border);
+  border-radius: 8px;
+  background: var(--c-bg);
+  color: var(--c-text);
+  /* iOS 在 font-size < 16px 的輸入框會自動放大畫面。 */
+  font-size: 16px;
+}
+
+.field textarea {
+  font-family: inherit;
+  resize: vertical;
 }
 
 .reasons {

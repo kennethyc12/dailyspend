@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { SpendRecord } from '@/models/types'
 import RecordEditView from '@/views/RecordEditView.vue'
 import { createFromText } from '@/services/entryService'
+import { prepareRecord } from '@/services/recordService'
 import { createFromInvoice } from '@/services/invoiceService'
 import { parseEInvoicePayload } from '@/recognize/einvoicePayload'
 import { compressPhoto } from '@/photo/compress'
@@ -141,6 +142,29 @@ describe('編輯紀錄：不能默默改壞資料', () => {
 
     expect(wrapper.text()).toContain('金額不能空白')
     expect(await amountOf(before.id)).toBe(55)
+  })
+
+  it('改日期撞到另一張同號碼的發票：說明原因，兩筆都不變', async () => {
+    const base = await textRecord('甲店 320')
+    const mine = prepareRecord({ ...base, date: '2026-01-05', invoiceNumber: 'AB00000001' })
+    const other = prepareRecord({
+      ...base,
+      id: 'other',
+      merchant: '乙店',
+      date: '2026-03-05',
+      invoiceNumber: 'AB00000001',
+    })
+    await storage().put('records', mine)
+    await storage().put('records', other)
+    const wrapper = await openEditor(mine.id)
+
+    await field(wrapper, '日期').setValue('2026-03-06')
+    await button(wrapper, '儲存').trigger('click')
+    await settled(wrapper)
+
+    expect(wrapper.text()).toContain('和另一張同號碼的發票重複')
+    expect(await storage().get('records', mine.id)).toEqual(mine)
+    expect(await storage().get('records', 'other')).toEqual(other)
   })
 
   it('金額改回原值，儲存鈕回到「沒有變更」', async () => {

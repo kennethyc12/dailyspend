@@ -11,8 +11,9 @@ import {
   getRecord,
   removePhoto,
   updateRecordFields,
-  ValidationError,
 } from '@/services/entryService'
+import { userMessage } from '@/errors/userMessage'
+import { formFrom, formToPatch, isDirty, type RecordForm } from '@/views/recordForm'
 import { usePhotoPicker } from '@/composables/usePhotoPicker'
 import { activeCategories, categoryName, refreshRecords } from '@/composables/useRecords'
 import { initStorage } from '@/composables/useStorageStatus'
@@ -30,40 +31,14 @@ const confirmingDelete = ref(false)
 const picker = usePhotoPicker()
 const perItemNeeded = ref(false)
 
-const date = ref('')
-const merchant = ref('')
-// type="number" 的 v-model 會把輸入轉成數字，清空時則是 ''
-const amount = ref<string | number>('')
-const itemsText = ref('')
-const note = ref('')
+const form = ref<RecordForm>({ date: '', merchant: '', amount: '', itemsText: '', note: '' })
 
-// 發票的品名可以含空白，所以一行一個品項，不用空白分隔
-const ITEM_SEPARATOR = '\n'
-
-function itemsToText(r: SpendRecord): string {
-  return r.items.map((i) => i.name).join(ITEM_SEPARATOR)
-}
-
-const dirty = computed(() => {
-  const r = record.value
-  if (!r) return false
-  return (
-    date.value !== r.date ||
-    merchant.value !== r.merchant ||
-    String(amount.value) !== String(r.amount) ||
-    itemsText.value !== itemsToText(r) ||
-    note.value !== r.note
-  )
-})
+const dirty = computed(() => (record.value ? isDirty(form.value, record.value) : false))
 
 /** 載入時與存檔後：用紀錄重設整張表單。 */
 function fill(r: SpendRecord) {
   record.value = r
-  date.value = r.date
-  merchant.value = r.merchant
-  amount.value = String(r.amount)
-  itemsText.value = itemsToText(r)
-  note.value = r.note
+  form.value = formFrom(r)
 }
 
 /** 分類、照片這類立即生效的動作：只更新紀錄，保留使用者還沒存的修改。 */
@@ -99,7 +74,7 @@ async function act(fn: () => Promise<void>) {
     await fn()
     await refreshRecords()
   } catch (err) {
-    errorMsg.value = (err as Error).message
+    errorMsg.value = userMessage(err)
   } finally {
     saving.value = false
   }
@@ -108,17 +83,8 @@ async function act(fn: () => Promise<void>) {
 function save() {
   const r = record.value
   if (!r) return
-  const itemsChanged = itemsText.value !== itemsToText(r)
   return act(async () => {
-    // 0 是合法金額，service 分不出「清空」和「填 0」，只能在 view 擋
-    if (amount.value === '') throw new ValidationError('金額不能空白', 'amount')
-    const next = await updateRecordFields(storage, r, {
-      date: date.value,
-      merchant: merchant.value,
-      amount: Number(amount.value),
-      itemNames: itemsChanged ? itemsText.value.split(ITEM_SEPARATOR) : undefined,
-      note: note.value,
-    })
+    const next = await updateRecordFields(storage, r, formToPatch(form.value, r))
     fill(next)
     message.value = '已儲存'
   })
@@ -205,23 +171,23 @@ function remove() {
       <section class="panel">
         <label class="field">
           <span>日期</span>
-          <input v-model="date" type="date" :disabled="saving" />
+          <input v-model="form.date" type="date" :disabled="saving" />
         </label>
         <label class="field">
           <span>店家</span>
-          <input v-model="merchant" type="text" :disabled="saving" />
+          <input v-model="form.merchant" type="text" :disabled="saving" />
         </label>
         <label class="field">
           <span>金額</span>
-          <input v-model="amount" type="number" inputmode="numeric" step="1" :disabled="saving" />
+          <input v-model="form.amount" type="number" inputmode="numeric" step="1" :disabled="saving" />
         </label>
         <label class="field">
           <span>品項</span>
-          <textarea v-model="itemsText" rows="3" placeholder="一行一個品項" :disabled="saving" />
+          <textarea v-model="form.itemsText" rows="3" placeholder="一行一個品項" :disabled="saving" />
         </label>
         <label class="field">
           <span>備註</span>
-          <input v-model="note" type="text" :disabled="saving" />
+          <input v-model="form.note" type="text" :disabled="saving" />
         </label>
 
         <button class="btn-primary mt" :disabled="saving || !dirty" @click="save">

@@ -4,7 +4,13 @@ import { parseQuickInput, type BlockingError, type QuickInputParse } from '@/par
 import { classifyWithRules } from '@/classify/ruleClassifier'
 import type { ClassifyInput } from '@/classify/port'
 import { planCorrection, type CorrectionPlan, type CorrectionScope } from '@/classify/correction'
-import { applyCorrection, loadActiveRules, recordHits, writeCorrection } from './ruleService'
+import {
+  applyCorrection,
+  bumpHits,
+  loadActiveRules,
+  recordHits,
+  writeCorrection,
+} from './ruleService'
 import { prepareRecord, saveRecord, type SaveOutcome } from './recordService'
 import type { Settings } from '@/models/types'
 import { ISO_DATE, isValidYmd, parseIso } from '@/analysis/dates'
@@ -213,6 +219,8 @@ export interface ResolveOptions {
   remember: boolean
   /** 逐項面板的「略過，只記住店家」。 */
   skipPerItem?: boolean
+  /** 就地編輯時重分類命中、且最後採用了重分類結果的規則（B4.2b-2）。 */
+  hitRuleIds?: string[]
   now?: number
 }
 
@@ -263,10 +271,30 @@ export async function resolvePending(
 
   const learned = await storage.transaction(['rules', 'records'], async (tx) => {
     const rule = plan ? await writeCorrection(tx, plan) : null
+    if (opts.hitRuleIds?.length) await bumpHits(tx, opts.hitRuleIds, now)
     await tx.put('records', next)
     return rule
   })
   return { kind: 'confirmed', record: next, learned }
+}
+
+/** 逐項面板選類別：立即學品項規則，紀錄等「完成並確認」再寫（B4.2b-2）。 */
+export async function learnItemRule(
+  storage: StoragePort,
+  items: { name: string }[],
+  index: number,
+  categoryId: string,
+  now = Date.now(),
+): Promise<Rule | null> {
+  const plan = planCorrection({
+    merchant: null,
+    items,
+    targetCategoryId: categoryId,
+    scope: { kind: 'item', index },
+    existingRules: await storage.getAll<Rule>('rules'),
+    now,
+  })
+  return applyCorrection(storage, plan)
 }
 
 /** §10 的「確認」：使用者看過了，清掉所有待確認原因。 */
@@ -300,16 +328,20 @@ export interface RecordPatch {
   note?: string
 }
 
-/**
- * 編輯既有紀錄。分類來源是 `user` 時不會被重跑的規則蓋掉——
- * 使用者改過的分類比規則可信（§7.3 同樣的原則）。
- */
-export async function updateRecordFields(
+export interface RecordUpdate {
+  record: SpendRecord
+  /** 重分類命中的規則；呼叫端決定要不要、何時累計命中次數。 */
+  matchedRuleIds: string[]
+}
+
+/** updateRecordFields 的「算」：驗證、重組品項、必要時重分類、prepareRecord。不寫入。 */
+export async function computeRecordUpdate(
   storage: StoragePort,
   record: SpendRecord,
   patch: RecordPatch,
-  now = Date.now(),
-): Promise<SpendRecord> {
+  opts: { now?: number; reclassify?: boolean } = {},
+): Promise<RecordUpdate> {
+  const now = opts.now ?? Date.now()
   const date = patch.date ?? record.date
   if (!ISO_DATE.test(date)) throw new ValidationError('日期格式需為 YYYY-MM-DD', 'date')
   const { y, m, d } = parseIso(date)
@@ -354,18 +386,35 @@ export async function updateRecordFields(
     updatedAt: now,
   }
 
+  let matchedRuleIds: string[] = []
   // 店家或品項變了就重跑分類，但使用者指定過的類別不動。
-  if (structureChanged && record.categorySource !== 'user') {
+  if (opts.reclassify !== false && structureChanged && record.categorySource !== 'user') {
     const out = await classify(storage, { merchant: merchant || null, items })
     next = applyClassification(next, out)
-    await recordHits(storage, out.matchedRuleIds, now)
+    matchedRuleIds = out.matchedRuleIds
   }
 
   // invoiceKey 由 prepareRecord 重算——它是 unique index 的 key，
   // 改了日期就必須跟著改，而且只能有一個產生點（§7.1）。
   next = prepareRecord(next)
   next.status = next.pendingReasons.length > 0 ? 'pending' : 'confirmed'
+  return { record: next, matchedRuleIds }
+}
 
+/**
+ * 編輯既有紀錄。分類來源是 `user` 時不會被重跑的規則蓋掉——
+ * 使用者改過的分類比規則可信（§7.3 同樣的原則）。
+ */
+export async function updateRecordFields(
+  storage: StoragePort,
+  record: SpendRecord,
+  patch: RecordPatch,
+  now = Date.now(),
+): Promise<SpendRecord> {
+  const { record: next, matchedRuleIds } = await computeRecordUpdate(storage, record, patch, {
+    now,
+  })
+  await recordHits(storage, matchedRuleIds, now)
   await storage.put('records', next)
   return next
 }
