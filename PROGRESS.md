@@ -53,6 +53,7 @@
 | B4.2b-2 | 待確認卡就地編輯欄位，確認時和類別、規則一起寫入 | ✅ | ✅ | 2026-10-15 真機 8 項全過：完成修改不寫入、補店家不自動離開、改店家重分類、改品項後逐項指定、放棄修改、取消修改、金額空白擋下、編輯頁照舊 |
 | B5a | 錯誤處理分工：非預期錯誤一定進錯誤紀錄 | ✅ | ✅ | 2026-10-16 真機驗收通過：預期錯誤顯示「情境：原因」不跳橫幅、還原壞檔「讀取失敗：…」、照片處理失敗跳「發生非預期的錯誤」並留在設定頁、設定頁文案、一般操作不受影響 |
 | B5b | 設定頁、分析頁與儲存層初始化的錯誤分工，修好照片壓縮存不進去 | ✅ | ✅ | 2026-10-16 真機驗收通過：照片壓縮兩欄都存得住、改參數後 QR 仍讀得到、設定頁規則／樣本操作與分析頁門檻不跳橫幅、環境檢查正常 |
+| settings-write | settings 寫入讀新鮮值，分析頁寫入成功才更新畫面 | ✅ | ✅ | 2026-10-17 真機驗收通過：分析頁改門檻後重新進頁仍保留、設定頁快速連改照片壓縮三欄重新進頁都保留、備份後「上次備份」更新 |
 
 ---
 
@@ -339,6 +340,8 @@ CI 加上 `npm run lint`，`package.json` 加上 `engines: node >=22`。
 ### Commit 紀錄
 
 ```
+8b18390 fix(settings-write): settings 寫入改在同一個 transaction 讀新鮮值，分析頁寫入成功才更新畫面
+a066734 記錄 B5b 真機確認通過
 a355e62 feat(b5b): 設定頁、分析頁與儲存層初始化的錯誤分工，修好照片壓縮存不進去
 151bbd4 記錄 B5a 真機確認通過
 b53745b feat(b5a): 錯誤處理分工，非預期錯誤一定進錯誤紀錄
@@ -423,6 +426,7 @@ v1 的程式寫完了。接下來最有價值的不是寫功能，是**讓真實
 | **B4.2b-2** ✅ | 待確認卡就地編輯欄位：編輯也是草稿、確認時和類別與規則同一個 transaction；拆 `updateRecordFields` 算／寫；逐項指定改草稿；`invoiceKey` 衝突訊息講人話 | 見 DECISIONS〈B4.2b research 後〉 |
 | **B5a** ✅ | 錯誤處理分工（有頁面測試的四頁）：`handleError` 集中分類，預期錯誤顯示「情境：原因」，非預期錯誤回報進錯誤紀錄並跳橫幅；記一筆、待確認、編輯、備份與照片選擇器改用它；`userMessage` 由它取代；橫幅與設定頁改「非預期」語意；規則見 design.md §15.1 | 業務錯誤仍用例外（偏離 D3「業務結果走回傳值」字面，使用者同意）；錯誤紀錄寫進 IndexedDB 延後 |
 | **B5b** ✅ | 錯誤處理分工（其餘）：`initStorage` 失敗回報、設定頁與分析頁的 catch 改用 `handleError`；先補設定頁、分析頁的頁面測試；併入修正「照片壓縮設定從 Phase 9a 起存不進去」（深層 ref 的巢狀 Proxy，改 `toRaw`） | 先補測試再改、併入照片壓縮修正都是使用者決定；QrLab 不做 |
+| **settings-write** ✅ | 分析頁門檻樂觀更新 ticket：`updateSettings` 在單一 transaction 讀新鮮 settings 再寫（`markBackedUp` 改用它）；分析頁寫入成功才更新畫面；設定頁照片壓縮指派回傳值、不再靠 `initStorage` 重讀（刪 `toRaw`）；兩頁開頭清 `errorMsg` | 偏離 B5b「存完靠 `initStorage` 重讀」、存檔完成時會重設正在輸入的其他欄位，都是使用者同意；`initStorage` 第 37 行先讀再寫留給 B7 |
 | **B6** | 分析：門檻下限、佐證紀錄看得到 | — |
 | **B7** | 架構清理：`initStorage` 單一入口（含：執行中再呼叫會直接 return，`await initStorage()` 不保證重讀完成；第 37 行寫回 `persistGranted` 是不在 transaction 裡的先讀再寫，可能蓋掉剛改的門檻，可改用 `updateSettings`）、重複文案、沒在用的 port 與設定項 | 刪 `RuleClassifier`／`ClassifierPort` 偏離 design.md §6.4，要先取得同意；`invoiceKey.ts` 自己的日期 regex（有 capture group）和 `dates.ts` 的 `ISO_DATE` 重複，評估能否共用 |
 | **B8** | 文件同步 | FEATURES.md:76「共 10 種」待確認原因（現在 11 種）、文件裡的測試數、design.md §3.7／§4.4 的新規則、「單價語意未定」的舊說法（FEATURES.md、`einvoicePayload.ts`、`invoiceService.ts`、`QuickInputView.vue:278-280`）、本文件「開發指令」的 CI 流程漏了 lint；編碼相關的舊說法：`FEATURES.md:136`「品項編碼已由實拍樣本確認是 UTF-8」、`design.md` §5.2.2「品項的編碼是 Base64 還是 Big5」、`design.md` §12〈#1 樣本可以延後到 Phase 9〉表格「QR 原始文字」那一列（還寫著「品項編碼…⏳ 仍缺」）、`qrDetect.ts:12` 的註解漏了 UTF-8 |
