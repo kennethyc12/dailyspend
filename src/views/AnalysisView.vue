@@ -8,6 +8,7 @@ import { todayIso } from '@/parsing/quickInput'
 import { refreshRecords, useRecords } from '@/composables/useRecords'
 import { initStorage } from '@/composables/useStorageStatus'
 import { handleError } from '@/errors/handleError'
+import { updateSettings } from '@/services/settingsService'
 
 const storage = getStorage()
 const { records, categories } = useRecords()
@@ -36,22 +37,20 @@ const others = computed(() => {
 
 /** 門檻改動即時重算並存回 settings，下次開啟沿用。 */
 async function updateThreshold(path: [string, string], value: number) {
-  const current = settings.value
-  if (!current || !Number.isFinite(value)) return
+  errorMsg.value = null
+  if (!settings.value || !Number.isFinite(value)) return
 
   const [group, key] = path
-  const next: Settings = {
-    ...current,
-    thresholds: {
-      ...current.thresholds,
-      [group]: { ...(current.thresholds as never as Record<string, object>)[group], [key]: value },
-    } as Settings['thresholds'],
-    updatedAt: Date.now(),
-  }
-  settings.value = next
-
   try {
-    await storage.put('settings', next)
+    const saved = await updateSettings(storage, (s) => ({
+      ...s,
+      thresholds: {
+        ...s.thresholds,
+        [group]: { ...(s.thresholds as never as Record<string, object>)[group], [key]: value },
+      } as Settings['thresholds'],
+    }))
+    // 寫入成功才更新畫面：失敗時畫面與重新進頁一致
+    if (saved) settings.value = saved
   } catch (err) {
     errorMsg.value = handleError(err, { where: 'AnalysisView.updateThreshold', failed: '門檻儲存失敗' })
   }

@@ -49,6 +49,14 @@ async function showBuiltin(wrapper: VueWrapper) {
 const savedQuality = async () =>
   (await storage().get<Settings>('settings', 'settings'))!.photo.quality
 
+const saved = async () => (await storage().get<Settings>('settings', 'settings'))!
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((r) => (resolve = r))
+  return { promise, resolve }
+}
+
 describe('設定頁：既有行為', () => {
   it('停用內建規則，重新進頁仍是停用', async () => {
     const wrapper = await open()
@@ -96,11 +104,11 @@ describe('設定頁：既有行為', () => {
     expect((field(again, 'JPEG 品質（0–1）').element as HTMLInputElement).value).toBe('0.5')
   })
 
-  // 每次存完都重讀 settings；少了這步，第二次會用舊值展開、把第一次改的蓋回去（B5b 修好存檔後才碰得到）
+  // 存完要把寫入的 settings 指派回頁面；少了這步，畫面與下一次比對用的都是舊值
   it('連改兩個照片壓縮欄位，重新進頁兩個都是新值', async () => {
     const wrapper = await open()
     await field(wrapper, 'JPEG 品質（0–1）').setValue('0.5')
-    // 等頁面拿到重讀後的 settings 再改下一欄（寫入完成但重讀未完時改，會互搶，見 PROGRESS ticket）
+    // 等頁面拿到寫入後的 settings；不等也不會互搶，見〈連改照片壓縮欄位〉
     await vi.waitFor(() => expect(useStorageStatus().settings.value?.photo.quality).toBe(0.5))
     await field(wrapper, '原圖長邊上限（px）').setValue('1200')
     await vi.waitFor(async () =>
@@ -161,6 +169,61 @@ describe('設定頁：非預期錯誤（B5b）', () => {
     expect(reportedWhere()).toEqual(['useStorageStatus.initStorage'])
     await button(wrapper, '環境檢查 ▸').trigger('click')
     expect(wrapper.text()).not.toContain('dailyspend v1')
+    clearErrors()
+  })
+})
+
+describe('設定頁：連改照片壓縮欄位', () => {
+  it('同步連改兩欄，兩個都存進去', async () => {
+    const wrapper = await open()
+    const quality = field(wrapper, 'JPEG 品質（0–1）').element as HTMLInputElement
+    const maxEdge = field(wrapper, '原圖長邊上限（px）').element as HTMLInputElement
+    quality.value = '0.5'
+    quality.dispatchEvent(new Event('change'))
+    maxEdge.value = '1200'
+    maxEdge.dispatchEvent(new Event('change'))
+
+    await vi.waitFor(async () => {
+      const { photo } = await saved()
+      expect([photo.quality, photo.maxEdge]).toEqual([0.5, 1200])
+    })
+  })
+
+  it('重讀還沒完成時連改三欄，三個都存進去', async () => {
+    const wrapper = await open()
+    const estimate = deferred<StorageEstimate>()
+    // jsdom 沒有 navigator.storage；讓舊程式的 initStorage 停在 estimateUsage（已過重讀 settings 那一步）
+    Object.defineProperty(navigator, 'storage', {
+      configurable: true,
+      value: { estimate: () => estimate.promise },
+    })
+    try {
+      await field(wrapper, 'JPEG 品質（0–1）').setValue('0.5')
+      await vi.waitFor(() => expect(useStorageStatus().settings.value?.photo.quality).toBe(0.5))
+      await field(wrapper, '原圖長邊上限（px）').setValue('1200')
+      await vi.waitFor(async () => expect((await saved()).photo.maxEdge).toBe(1200))
+      await field(wrapper, '縮圖長邊（px）').setValue('400')
+      await vi.waitFor(async () => expect((await saved()).photo.thumbEdge).toBe(400))
+
+      expect((await saved()).photo).toEqual({ quality: 0.5, maxEdge: 1200, thumbEdge: 400 })
+    } finally {
+      estimate.resolve({ usage: 0, quota: 0 })
+      await vi.waitFor(() => expect(useStorageStatus().state.value).not.toBe('running'))
+      delete (navigator as { storage?: StorageManager }).storage
+    }
+  })
+
+  it('失敗後下一次成功，錯誤訊息消失', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const wrapper = await open()
+    failPutOn('settings')
+    await field(wrapper, 'JPEG 品質（0–1）').setValue('0.5')
+    await waitForText(wrapper, '照片壓縮設定儲存失敗')
+    vi.restoreAllMocks()
+
+    await field(wrapper, 'JPEG 品質（0–1）').setValue('0.6')
+    await vi.waitFor(async () => expect(await savedQuality()).toBe(0.6))
+    await vi.waitFor(() => expect(wrapper.text()).not.toContain('照片壓縮設定儲存失敗'))
     clearErrors()
   })
 })

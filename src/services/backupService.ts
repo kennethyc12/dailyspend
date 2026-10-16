@@ -2,6 +2,7 @@ import type { Category, Settings, SpendRecord } from '@/models/types'
 import type { StoragePort } from '@/storage'
 import { categoryNameMap, csvBlob, toCsv } from '@/backup/csv'
 import { backupFileName, csvFileName } from '@/backup/share'
+import { updateSettings } from '@/services/settingsService'
 import {
   createBackup,
   readBackup,
@@ -49,13 +50,7 @@ export async function buildBackupFile(storage: StoragePort, now = new Date()): P
 }
 
 export async function markBackedUp(storage: StoragePort, now = Date.now()): Promise<void> {
-  const settings = await storage.get<Settings>('settings', 'settings')
-  if (!settings) return
-  await storage.put('settings', {
-    ...settings,
-    backup: { ...settings.backup, lastBackupAt: now },
-    updatedAt: now,
-  })
+  await updateSettings(storage, (s) => ({ ...s, backup: { ...s.backup, lastBackupAt: now } }), now)
 }
 
 export function shouldRemindBackup(
