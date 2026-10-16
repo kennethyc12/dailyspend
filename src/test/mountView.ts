@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, vi } from 'vitest'
 import { mount, type DOMWrapper, type VueWrapper } from '@vue/test-utils'
-import { IDBFactory } from 'fake-indexeddb'
+import { IDBFactory, IDBObjectStore } from 'fake-indexeddb'
 import type { Component } from 'vue'
 import { IndexedDbAdapter, seed, setStorage } from '@/storage'
 import { seedBuiltinRules } from '@/services/ruleService'
@@ -96,4 +96,16 @@ export async function settled(wrapper: VueWrapper, selector = 'input, select, te
 
 export async function waitForText(wrapper: VueWrapper, text: string) {
   await vi.waitFor(() => expect(wrapper.text()).toContain(text))
+}
+
+/** 讓某個 store 的寫入丟空間不足。注入在第三方 I/O 層，自己的 adapter 照常執行；呼叫端要 vi.restoreAllMocks()。 */
+export function failPutOn(storeName: string) {
+  const real = IDBObjectStore.prototype.put
+  vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(function (
+    this: IDBObjectStore,
+    ...args: Parameters<IDBObjectStore['put']>
+  ) {
+    if (this.name === storeName) throw new DOMException('quota', 'QuotaExceededError')
+    return real.apply(this, args)
+  })
 }

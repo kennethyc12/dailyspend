@@ -7,6 +7,7 @@ import { KIND_LABEL, type Finding } from '@/analysis/types'
 import { todayIso } from '@/parsing/quickInput'
 import { refreshRecords, useRecords } from '@/composables/useRecords'
 import { initStorage } from '@/composables/useStorageStatus'
+import { handleError } from '@/errors/handleError'
 
 const storage = getStorage()
 const { records, categories } = useRecords()
@@ -52,7 +53,7 @@ async function updateThreshold(path: [string, string], value: number) {
   try {
     await storage.put('settings', next)
   } catch (err) {
-    errorMsg.value = `門檻儲存失敗：${(err as Error).message}`
+    errorMsg.value = handleError(err, { where: 'AnalysisView.updateThreshold', failed: '門檻儲存失敗' })
   }
 }
 

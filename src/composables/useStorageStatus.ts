@@ -3,6 +3,7 @@ import { getStorage, seed } from '@/storage'
 import { loadActiveRules, seedBuiltinRules } from '@/services/ruleService'
 import { shouldRemindBackup } from '@/services/backupService'
 import type { Category, Settings } from '@/models/types'
+import { reportError } from '@/errors/errorLog'
 
 export type InitState = 'idle' | 'running' | 'ready' | 'failed'
 
@@ -46,6 +47,8 @@ export async function initStorage() {
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e)
     state.value = 'failed'
+    // 環境檢查顯示原文；錯誤紀錄留 stack 與 where（B5b）
+    reportError(e, 'manual', 'useStorageStatus.initStorage')
   }
 }
 

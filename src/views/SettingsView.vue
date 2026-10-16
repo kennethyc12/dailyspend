@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, shallowRef } from 'vue'
+import { computed, onMounted, onUnmounted, ref, shallowRef, toRaw } from 'vue'
 import { getStorage } from '@/storage'
 import type { Photo, Rule, RuleOrigin } from '@/models/types'
 import { deleteRule, listRules, setRuleActive } from '@/services/ruleService'
@@ -9,6 +9,7 @@ import { initStorage, useStorageStatus } from '@/composables/useStorageStatus'
 import type { Settings } from '@/models/types'
 import { useDisplayMode } from '@/composables/useDisplayMode'
 import { clearErrors, useErrorLog } from '@/errors/errorLog'
+import { handleError } from '@/errors/handleError'
 
 const storage = getStorage()
 const { isStandalone, platform } = useDisplayMode()
@@ -72,7 +73,7 @@ async function act(fn: () => Promise<void>, reload: () => Promise<void> = loadRu
     await fn()
     await reload()
   } catch (err) {
-    errorMsg.value = (err as Error).message
+    errorMsg.value = handleError(err, { where: 'SettingsView.act', failed: '操作失敗' })
   }
 }
 
@@ -92,7 +93,8 @@ const PHOTO_FIELDS: Array<{ key: keyof Settings['photo']; label: string; step: n
 
 /** 壓太狠會讓發票 QR 解不出來，所以做成可調，Phase 9 用真實發票實測後再定。 */
 async function updatePhotoSetting(key: keyof Settings['photo'], value: number) {
-  const current = settings.value
+  // settings 是深層 ref，巢狀欄位是 Proxy，直接展開寫進 IndexedDB 會 structured clone 失敗
+  const current = toRaw(settings.value)
   if (!current || !Number.isFinite(value) || value <= 0) return
 
   const next: Settings = {
@@ -104,7 +106,10 @@ async function updatePhotoSetting(key: keyof Settings['photo'], value: number) {
     await storage.put('settings', next)
     await initStorage()
   } catch (err) {
-    errorMsg.value = (err as Error).message
+    errorMsg.value = handleError(err, {
+      where: 'SettingsView.updatePhotoSetting',
+      failed: '照片壓縮設定儲存失敗',
+    })
   }
 }
 

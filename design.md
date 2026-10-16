@@ -1294,6 +1294,7 @@ Phase 3–5 是純邏輯，不受平台影響，可全速在電腦上開發。
 - 預期錯誤——使用者操作或資料本身造成的：`ValidationError`、`BackupFormatError`、`CarrierImportStaleError`，以及呼叫端有給 `conflict` 的 records 撞號（`by_invoiceKey`）。頁面顯示「情境：原因」，不回報。
 - 非預期錯誤——其他全部：`reportError` 進錯誤紀錄（含 stack 與 `where`）並跳橫幅；頁面只顯示「情境。已記錄錯誤，可到設定頁的『非預期的錯誤』查看」，不顯示原文。
 - 撞號的意思由呼叫端決定：同一個 unique index 在「改日期」是撞到另一張發票，在「還原」是備份檔本身有重複。
+- `initStorage` 是例外：它沒有頁面情境句，失敗時直接 `reportError`，環境檢查「資料庫」那格照舊顯示原文（那格是診斷欄位）（B5b，2026-10-16 使用者同意）。
 - 業務錯誤仍以例外表達，不改成回傳值（偏離 DECISIONS D3「業務結果走回傳值」字面，B5 使用者同意）。
 - 「資料未變更」這類情境句是 transaction 回滾才成立的保證，所以頁面還是要接住錯誤講情境，不直接交給全域。
 
