@@ -775,13 +775,15 @@ else → merge(existing, incoming)
 
 分析一律 **on-demand 計算**，不預先彙總；單人資料量不需要 materialized view。超過 5 萬筆再加月度彙總 store。
 
-| 規則 | 判斷式 | 參數 | 預設 |
-|---|---|---|---|
-| **高頻小額** | 近 N 天內，單筆 ≤ A 元 且 同類別次數 ≥ C | `windowDays` `smallAmount` `minCount` | 30 / 150 / 8 |
-| **訂閱與固定支出** | 見 8.2 | `minMonths` `amountVariancePct` `maxMonthlyOccurrences` | 3 / 10% / 2 |
-| **月對月暴增** | 見 8.1 | `growthPct` `minDelta` `minDaysThisMonth` | 50% / 1000 / 7 |
-| **同類重複購買** | 近 N 天內，相同品項名出現在 ≥ K 筆紀錄（見 §8.5） | `windowDays` `minRepeat` `similarity` | 14 / 3 / `exact` |
-| **可降低建議** | 見 8.3 | `topN` | **3** |
+| 規則 | 判斷式 | 參數 | 預設 | 範圍（整數） |
+|---|---|---|---|---|
+| **高頻小額** | 近 N 天內，單筆 ≤ A 元 且 同類別次數 ≥ C | `windowDays` `smallAmount` `minCount` | 30 / 150 / 8 | 1–365 / ≥ 1 / ≥ 2 |
+| **訂閱與固定支出** | 見 8.2 | `minMonths` `amountVariancePct` `maxMonthlyOccurrences` | 3 / 10% / 2 | ≥ 2 / ≥ 0 / ≥ 1 |
+| **月對月暴增** | 見 8.1 | `growthPct` `minDelta` `minDaysThisMonth` | 50% / 1000 / 7 | ≥ 0 / ≥ 1 / 1–28 |
+| **同類重複購買** | 近 N 天內，相同品項名出現在 ≥ K 筆紀錄（見 §8.5） | `windowDays` `minRepeat` `similarity` | 14 / 3 / `exact` | 1–365 / ≥ 2 / — |
+| **可降低建議** | 見 8.3 | `topN` | **3** | ≥ 1 |
+
+範圍（B6a，2026-10-17，使用者同意）定義在 `THRESHOLD_RANGES`（`src/storage/defaults.ts`），同時用在兩處：分析頁寫入時擋下範圍外、小數與空白，顯示「門檻儲存失敗：<欄位>要填 <範圍>」；每次開啟時 `migrateSettings` 把已存的範圍外值夾回邊界、小數四捨五入、非數字退回預設。下限是讓規則語意成立的最小值（例如 `minMonths` 0 會讓訂閱偵測當掉、`minDelta` ≥ 1 保證本期有紀錄可當依據），上限只在會當掉或語意不成立時才設（觀察天數過大會超出日期範圍；`minDaysThisMonth` 大於 28 在二月永遠達不到）。
 
 ### 8.1 月對月暴增：比較區間定義
 

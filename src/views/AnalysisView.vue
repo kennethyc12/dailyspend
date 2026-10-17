@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, shallowRef } from 'vue'
-import { getStorage } from '@/storage'
+import { THRESHOLD_RANGES, getStorage, isInThresholdRange, type ThresholdRange } from '@/storage'
 import type { Settings } from '@/models/types'
 import { analyze } from '@/analysis/analyze'
 import { KIND_LABEL, type Finding } from '@/analysis/types'
@@ -9,6 +9,7 @@ import { refreshRecords, useRecords } from '@/composables/useRecords'
 import { initStorage } from '@/composables/useStorageStatus'
 import { handleError } from '@/errors/handleError'
 import { updateSettings } from '@/services/settingsService'
+import { ValidationError } from '@/services/entryService'
 
 const storage = getStorage()
 const { records, categories } = useRecords()
@@ -36,12 +37,18 @@ const others = computed(() => {
 })
 
 /** 門檻改動即時重算並存回 settings，下次開啟沿用。 */
-async function updateThreshold(path: [string, string], value: number) {
+async function updateThreshold(f: ThresholdField, raw: string) {
   errorMsg.value = null
-  if (!settings.value || !Number.isFinite(value)) return
+  if (!settings.value) return
 
-  const [group, key] = path
+  const [group, key] = f.path
   try {
+    const range = rangeOf(f.path)
+    // 空白先擋：Number('') 是 0，而 0 對變異 %、增幅 % 是合法值
+    const value = raw.trim() === '' ? Number.NaN : Number(raw)
+    if (!isInThresholdRange(value, range)) {
+      throw new ValidationError(`${f.label}要填 ${rangeText(range)}`, key)
+    }
     const saved = await updateSettings(storage, (s) => ({
       ...s,
       thresholds: {
@@ -56,7 +63,12 @@ async function updateThreshold(path: [string, string], value: number) {
   }
 }
 
-const THRESHOLD_FIELDS: Array<{ path: [string, string]; label: string }> = [
+interface ThresholdField {
+  path: [keyof Settings['thresholds'], string]
+  label: string
+}
+
+const THRESHOLD_FIELDS: ThresholdField[] = [
   { path: ['smallFrequent', 'windowDays'], label: '高頻小額 · 觀察天數' },
   { path: ['smallFrequent', 'smallAmount'], label: '高頻小額 · 單筆上限（元）' },
   { path: ['smallFrequent', 'minCount'], label: '高頻小額 · 最少次數' },
@@ -70,7 +82,15 @@ const THRESHOLD_FIELDS: Array<{ path: [string, string]; label: string }> = [
   { path: ['suggestion', 'topN'], label: '建議條數' },
 ]
 
-function thresholdValue(path: [string, string]): number {
+function rangeOf(path: ThresholdField['path']): ThresholdRange {
+  return (THRESHOLD_RANGES[path[0]] as Record<string, ThresholdRange>)[path[1]]!
+}
+
+function rangeText(r: ThresholdRange): string {
+  return r.max === undefined ? `${r.min} 以上的整數` : `${r.min}–${r.max} 的整數`
+}
+
+function thresholdValue(path: ThresholdField['path']): number {
   const groups = settings.value?.thresholds as never as Record<string, Record<string, number>>
   return groups?.[path[0]]?.[path[1]] ?? 0
 }
@@ -145,8 +165,11 @@ function evidenceText(f: Finding) {
             <input
               type="number"
               inputmode="numeric"
+              step="1"
+              :min="rangeOf(f.path).min"
+              :max="rangeOf(f.path).max"
               :value="thresholdValue(f.path)"
-              @change="updateThreshold(f.path, Number(($event.target as HTMLInputElement).value))"
+              @change="updateThreshold(f, ($event.target as HTMLInputElement).value)"
             />
           </label>
         </template>

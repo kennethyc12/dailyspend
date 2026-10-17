@@ -6,7 +6,14 @@ import type { StoragePort } from './port'
 export * from './port'
 export { IndexedDbAdapter } from './indexedDbAdapter'
 export { toIdbRange } from './indexedDbAdapter'
-export { defaultCategories, defaultSettings, migrateSettings } from './defaults'
+export {
+  defaultCategories,
+  defaultSettings,
+  migrateSettings,
+  THRESHOLD_RANGES,
+  isInThresholdRange,
+  type ThresholdRange,
+} from './defaults'
 export { DB_NAME, DB_VERSION } from './schema'
 
 /**
