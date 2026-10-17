@@ -19,6 +19,7 @@ import {
   waitForText,
 } from '@/test/mountView'
 import { clearErrors, useErrorLog } from '@/errors/errorLog'
+import { router } from '@/router'
 
 vi.mock('@/photo/compress', () => ({
   compressPhoto: vi.fn(),
@@ -296,5 +297,50 @@ describe('編輯紀錄：錯誤處理分工（B5a）', () => {
 
     expect(wrapper.text()).toContain('操作失敗：金額不能空白')
     expect(useErrorLog().errors.value).toEqual([])
+  })
+})
+
+describe('編輯紀錄：返回（B6b）', () => {
+  // 前一個測試留下的 history.state.back 會被 replace 沿用，所以每格都自己設定起點
+  async function enterFrom(from: string | null, id: string) {
+    if (from) {
+      await router.replace(from)
+      await router.push(`/records/${id}`)
+    } else {
+      await router.replace({ path: `/records/${id}`, state: { back: null }, force: true })
+    }
+    return openEditor(id)
+  }
+
+  it('從分析頁進來，返回回到分析頁', async () => {
+    const r = await textRecord('全家 咖啡 55')
+    const wrapper = await enterFrom('/analysis', r.id)
+    await wrapper.find('a.back').trigger('click')
+
+    await vi.waitFor(() => expect(router.currentRoute.value.fullPath).toBe('/analysis'))
+  })
+
+  it('沒有站內上一頁，返回回到紀錄頁', async () => {
+    const r = await textRecord('全家 咖啡 55')
+    const wrapper = await enterFrom(null, r.id)
+    await wrapper.find('a.back').trigger('click')
+
+    await vi.waitFor(() => expect(router.currentRoute.value.fullPath).toBe('/records'))
+  })
+
+  it('從分析頁進來刪除，仍然回到紀錄頁', async () => {
+    const r = await textRecord('全家 咖啡 55')
+    const wrapper = await enterFrom('/analysis', r.id)
+    await button(wrapper, '刪除這筆紀錄').trigger('click')
+    await button(wrapper, '確定刪除').trigger('click')
+
+    await vi.waitFor(() => expect(router.currentRoute.value.fullPath).toBe('/records'))
+  })
+
+  it('返回連結的文字是「← 返回」', async () => {
+    const r = await textRecord('全家 咖啡 55')
+    const wrapper = await enterFrom(null, r.id)
+
+    expect(wrapper.find('a.back').text()).toBe('← 返回')
   })
 })

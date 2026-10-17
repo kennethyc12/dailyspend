@@ -431,12 +431,14 @@ v1 的程式寫完了。接下來最有價值的不是寫功能，是**讓真實
 | **B5b** ✅ | 錯誤處理分工（其餘）：`initStorage` 失敗回報、設定頁與分析頁的 catch 改用 `handleError`；先補設定頁、分析頁的頁面測試；併入修正「照片壓縮設定從 Phase 9a 起存不進去」（深層 ref 的巢狀 Proxy，改 `toRaw`） | 先補測試再改、併入照片壓縮修正都是使用者決定；QrLab 不做 |
 | **settings-write** ✅ | 分析頁門檻樂觀更新 ticket：`updateSettings` 在單一 transaction 讀新鮮 settings 再寫（`markBackedUp` 改用它）；分析頁寫入成功才更新畫面；設定頁照片壓縮指派回傳值、不再靠 `initStorage` 重讀（刪 `toRaw`）；兩頁開頭清 `errorMsg` | 偏離 B5b「存完靠 `initStorage` 重讀」、存檔完成時會重設正在輸入的其他欄位，都是使用者同意；`initStorage` 第 37 行先讀再寫留給 B7 |
 | **B6a** ✅ | 分析門檻範圍：`THRESHOLD_RANGES`（全部整數）；分析頁寫入時擋下範圍外、小數與空白並說明；`migrateSettings` 把已存的壞值夾回範圍（修好「最少連續月數存成 0 後分析頁永久打不開」，含還原進來的壞值）；規則見 design.md §8 | B6 拆成 B6a／B6b、範圍值、還原帶字串退回預設都是使用者決定；`analyze` 不改 |
-| **B6b** | 分析：佐證紀錄看得到（就地展開、連到編輯頁）、編輯頁返回（觸發既有 ticket） | 見 DECISIONS〈B6 research 後〉Q4、Q5 |
+| **B6b** ✅ | 分析：佐證紀錄就地展開（`FindingItem`，日期新到舊、連到編輯頁，`kind:title` 當 key）；編輯頁「← 返回」有站內上一頁就 `router.back()`，否則回 `/records`；刪除後仍回 `/records` | 返回分析頁時展開與捲動消失、不做「再顯示 N 筆」、清單金額 `$1,300`、design.md 不改，都是使用者決定 |
 | **B7** | 架構清理：`initStorage` 單一入口（含：執行中再呼叫會直接 return，`await initStorage()` 不保證重讀完成；第 37 行寫回 `persistGranted` 是不在 transaction 裡的先讀再寫，可能蓋掉剛改的門檻，可改用 `updateSettings`）、重複文案、沒在用的 port 與設定項 | 刪 `RuleClassifier`／`ClassifierPort` 偏離 design.md §6.4，要先取得同意；`invoiceKey.ts` 自己的日期 regex（有 capture group）和 `dates.ts` 的 `ISO_DATE` 重複，評估能否共用 |
 | **B8** | 文件同步 | FEATURES.md:76「共 10 種」待確認原因（現在 11 種）、文件裡的測試數、design.md §3.7／§4.4 的新規則、「單價語意未定」的舊說法（FEATURES.md、`einvoicePayload.ts`、`invoiceService.ts`、`QuickInputView.vue:278-280`）、本文件「開發指令」的 CI 流程漏了 lint；編碼相關的舊說法：`FEATURES.md:136`「品項編碼已由實拍樣本確認是 UTF-8」、`design.md` §5.2.2「品項的編碼是 Base64 還是 Big5」、`design.md` §12〈#1 樣本可以延後到 Phase 9〉表格「QR 原始文字」那一列（還寫著「品項編碼…⏳ 仍缺」）、`qrDetect.ts:12` 的註解漏了 UTF-8 |
 
-另外二十一張 ticket：
-- `RecordEditView.test.ts`「略過逐項指定」在全套 `--sequence.shuffle` 下偶發失敗（chris 審 B6a 時 20 次紅 2 次；base `22e2cbf` 跑 6 次未重現，推測是既有時序問題，與 B6a 無關）。觸發點：CI 或一般執行也紅
+另外二十二張 ticket：
+- 返回分析頁時展開與捲動消失：從佐證清單點進一筆再「← 返回」，清單收合、可能回到頁首（沒有 `keep-alive`、`scrollBehavior`）。使用者 2026-10-17 決定接受。觸發點：真機回報看完一筆回來找不到原本那條
+- 「（無店家）」文案在 7 處重複（RecordsView、PendingView、BackupView×2、QuickInputView×2、FindingItem）。觸發點：這段文案要改時
+- `RecordEditView.test.ts`「略過逐項指定」在全套 `--sequence.shuffle` 下偶發失敗（chris 審 B6a 時 20 次紅 2 次；base `22e2cbf` 跑 6 次未重現，推測是既有時序問題，與 B6a 無關）。B6b 審閱時補充：單檔 30 seeds 紅 5 次，「逐項指定分類」也會紅，失敗的都排在檔內第 1～2 位，base `edb94f3` 同樣重現；推測是第一個測試冷啟動超過 `waitFor` 的 1000ms。觸發點：CI 或一般執行也紅
 - 設定頁照片壓縮的無效輸入靜默忽略：`updatePhotoSetting` 在 `value <= 0` 時直接 return、沒有提示，`quality` 大於 1 也接受（B6a 只做分析頁）。觸發點：真機改壞照片參數，或 9b-3 驗收時
 - jsdom 的 `DOMException` 不是 `Error` 子類，錯誤紀錄的 message 會記成 `{}`（測試因此只斷言 where 與筆數）。推測真機不會（WebIDL 規定原型是 `Error.prototype`）。觸發點：真機錯誤紀錄出現 `{}`
 - 記一筆讀 QR 時 `detectQrCodes` 回 `error`（例如 wasm 載入失敗）：畫面顯示原文、不進錯誤紀錄，「讀取發票失敗」字樣在 `onPickPhoto` 寫了兩次（結果分支與 catch）。觸發點：有人遇到 wasm 載入失敗，或 B7 清理 QrLab 時（`detectQrCodes` 兩頁共用，正確修法要改它的回傳；使用者 2026-10-16 決定）
@@ -445,7 +447,6 @@ v1 的程式寫完了。接下來最有價值的不是寫功能，是**讓真實
 - `SettingsView.vue`、`QrLabView.vue` 的 `loadSamples` 在頁面卸載後才 resolve 時，建出的縮圖 object URL 不會被 revoke（小洩漏）。觸發點：B7 把兩頁改用 `useThumbnails`
 - `multi_item_correction` 沒有產生點（design.md §6.2「略過」要記它）。P2，之後再評估實作（使用者 2026-10-14 決定，不刪）。卡點：待確認頁的「略過，只記住店家」會直接確認，這個事件型原因加上去會讓剛確認的紀錄立刻回到待確認；要實作得先想清楚它出現在哪裡（例如編輯頁的略過，或另一種不會進待確認的標記）。觸發點：使用者想回頭找「整筆改過分類的多品項紀錄」
 - §6.2 的 undo 沒做（B4.2a 正式承認不一致，目前只有提示文字）。觸發點：使用者回報誤記規則要去設定頁刪很麻煩
-- 編輯頁返回連結寫死 `/records`（`RecordEditView.vue`），從其他頁進來回不去。觸發點：B4.2b 或任何頁面要連到編輯頁時
 - 改日期後 `invoiceKey` 撞到另一筆時不合併（`saveRecord` 有 catch 後合併，編輯與待確認卡沒有）。訊息已講人話（B4.2b-2 `userMessage`），合併仍未做。觸發點：使用者回報改日期存不了而需要合併
 - 待確認卡依原因聚焦欄位（design.md §3.7「不同 reason 對應不同的修正欄位聚焦」）。觸發點：B4.2b 之後覺得找欄位麻煩
 - `rawRecognition` 只存解析後的結果，parser 有 bug 時事後救不回來。要不要另存原始 payload

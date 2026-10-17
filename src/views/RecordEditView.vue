@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, shallowRef } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute, useRouter, type UseLinkReturn } from 'vue-router'
 import { getStorage } from '@/storage'
 import type { SpendRecord } from '@/models/types'
 import {
@@ -159,6 +159,16 @@ function dropPhoto() {
   })
 }
 
+// 從分析頁等站內頁面進來時回到原頁；冷啟動或外部連結進來時 back 是 null，退回紀錄頁
+function goBack(e: MouseEvent, navigate: UseLinkReturn['navigate']) {
+  if (router.options.history.state.back) {
+    e.preventDefault()
+    router.back()
+  } else {
+    void navigate(e)
+  }
+}
+
 function remove() {
   const r = record.value
   if (!r) return
@@ -171,7 +181,9 @@ function remove() {
 
 <template>
   <main class="page">
-    <RouterLink to="/records" class="back">← 紀錄</RouterLink>
+    <RouterLink v-slot="{ href, navigate }" to="/records" custom>
+      <a :href="href" class="back" @click="goBack($event, navigate)">← 返回</a>
+    </RouterLink>
     <h1>編輯紀錄</h1>
 
     <p v-if="loading" class="hint">載入中…</p>

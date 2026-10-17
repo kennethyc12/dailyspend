@@ -3,12 +3,13 @@ import { computed, onMounted, ref, shallowRef } from 'vue'
 import { THRESHOLD_RANGES, getStorage, isInThresholdRange, type ThresholdRange } from '@/storage'
 import type { Settings } from '@/models/types'
 import { analyze } from '@/analysis/analyze'
-import { KIND_LABEL, type Finding } from '@/analysis/types'
+import { KIND_LABEL } from '@/analysis/types'
 import { todayIso } from '@/parsing/quickInput'
 import { refreshRecords, useRecords } from '@/composables/useRecords'
 import { initStorage } from '@/composables/useStorageStatus'
 import { handleError } from '@/errors/handleError'
 import { updateSettings } from '@/services/settingsService'
+import FindingItem from '@/components/FindingItem.vue'
 import { ValidationError } from '@/services/entryService'
 
 const storage = getStorage()
@@ -94,17 +95,6 @@ function thresholdValue(path: ThresholdField['path']): number {
   const groups = settings.value?.thresholds as never as Record<string, Record<string, number>>
   return groups?.[path[0]]?.[path[1]] ?? 0
 }
-
-function money(n: number) {
-  return n.toLocaleString('zh-TW')
-}
-
-function evidenceText(f: Finding) {
-  const n = f.evidence.recordIds.length
-  return f.evidence.itemNames?.length
-    ? `依據：${f.evidence.itemNames.join('、')}，共 ${n} 筆紀錄`
-    : `依據：${n} 筆紀錄`
-}
 </script>
 
 <template>
@@ -118,28 +108,24 @@ function evidenceText(f: Finding) {
         <h2>可以考慮減少的支出</h2>
         <p class="hint">依「每月等值金額」排序，不同性質的支出才能互相比較。</p>
         <ol class="findings">
-          <li v-for="(f, i) in result.suggestions" :key="i">
-            <div class="row">
-              <span class="title">{{ f.title }}</span>
-              <span class="money">{{ f.estimated ? '約 ' : '' }}${{ money(f.monthlyEquivalent) }}/月</span>
-            </div>
-            <p class="detail">{{ f.detail }}</p>
-            <p class="evidence">{{ KIND_LABEL[f.kind] }} · {{ evidenceText(f) }}</p>
-          </li>
+          <FindingItem
+            v-for="f in result.suggestions"
+            :key="`${f.kind}:${f.title}`"
+            :finding="f"
+            :records="records"
+          />
         </ol>
       </section>
 
       <section v-if="others.length" class="panel">
         <h2>其他觀察</h2>
         <ol class="findings">
-          <li v-for="(f, i) in others" :key="i">
-            <div class="row">
-              <span class="title">{{ f.title }}</span>
-              <span class="money">{{ f.estimated ? '約 ' : '' }}${{ money(f.monthlyEquivalent) }}/月</span>
-            </div>
-            <p class="detail">{{ f.detail }}</p>
-            <p class="evidence">{{ KIND_LABEL[f.kind] }} · {{ evidenceText(f) }}</p>
-          </li>
+          <FindingItem
+            v-for="f in others"
+            :key="`${f.kind}:${f.title}`"
+            :finding="f"
+            :records="records"
+          />
         </ol>
       </section>
 
@@ -182,46 +168,6 @@ function evidenceText(f: Finding) {
 .findings {
   list-style: none;
   counter-reset: item;
-}
-
-.findings li {
-  padding: var(--space-3) 0;
-  border-bottom: 1px solid var(--c-border);
-}
-
-.findings li:last-child {
-  border-bottom: none;
-  padding-bottom: 0;
-}
-
-.row {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--space-3);
-}
-
-.title {
-  font-weight: 600;
-  font-size: 15px;
-}
-
-.money {
-  white-space: nowrap;
-  font-variant-numeric: tabular-nums;
-  color: var(--c-accent);
-}
-
-.detail {
-  margin-top: 2px;
-  font-size: 13px;
-  color: var(--c-text-dim);
-}
-
-.evidence {
-  margin-top: 2px;
-  font-size: 12px;
-  color: var(--c-text-dim);
 }
 
 .pending-list {
