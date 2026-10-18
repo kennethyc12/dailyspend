@@ -57,6 +57,7 @@
 | B6a | 分析門檻合法範圍、無效輸入提示、修回已存的壞值 | ✅ | ✅ | 2026-10-17 真機驗收通過：分析頁正常打開、清空最少連續月數出現範圍提示且值不變不跳橫幅、建議條數 0 被擋、增幅門檻 0 存得進去、其他門檻照常保留 |
 | B6b | 分析頁佐證紀錄就地展開、連到編輯頁；編輯頁返回回到原頁 | ✅ | ✅ | 2026-10-17 真機驗收通過：依據可展開與收合且日期新到舊、點進編輯頁後返回回到分析頁、從紀錄頁進來返回紀錄頁、重開後返回紀錄頁、刪除後到紀錄頁、依據那一行外觀不變 |
 | B7a | `initStorage` 呼叫後保證完成一次完整執行、寫回 persistGranted 不蓋掉並行寫入、還原後紅點立刻更新 | ✅ | ✅ | 2026-10-18 真機驗收通過：冷啟動直接進分析頁正常、記一筆「準備中…」沒有明顯變長、備份後上次備份更新、還原含待確認的備份後紅點立刻正確 |
+| backup-reminder | 記帳頁補回備份提醒橫幅（Phase 7 起遺失），點了進備份頁 | ✅ | ✅ | 2026-10-18 真機驗收通過：符合條件時記帳頁出現橫幅、點了進備份頁、完整備份後回記帳頁消失、取消分享時仍在、亮色暗色都清楚 |
 
 ---
 
@@ -343,6 +344,8 @@ CI 加上 `npm run lint`，`package.json` 加上 `engines: node >=22`。
 ### Commit 紀錄
 
 ```
+a5b1b19 fix(backup-reminder): 記帳頁補回備份提醒橫幅，點了進備份頁
+b9bd13e 記錄 B7a 真機確認通過
 5e828fb fix(b7a): initStorage 呼叫後保證完成一次完整執行，寫回 persistGranted 不再蓋掉並行寫入，還原後紅點立刻更新
 851d107 記錄 B6b 真機確認通過
 85c3363 feat(b6b): 分析頁的佐證紀錄可以展開並點進編輯頁，編輯頁返回回到原頁
@@ -439,7 +442,7 @@ v1 的程式寫完了。接下來最有價值的不是寫功能，是**讓真實
 | **B6a** ✅ | 分析門檻範圍：`THRESHOLD_RANGES`（全部整數）；分析頁寫入時擋下範圍外、小數與空白並說明；`migrateSettings` 把已存的壞值夾回範圍（修好「最少連續月數存成 0 後分析頁永久打不開」，含還原進來的壞值）；規則見 design.md §8 | B6 拆成 B6a／B6b、範圍值、還原帶字串退回預設都是使用者決定；`analyze` 不改 |
 | **B6b** ✅ | 分析：佐證紀錄就地展開（`FindingItem`，日期新到舊、連到編輯頁，`kind:title` 當 key）；編輯頁「← 返回」有站內上一頁就 `router.back()`，否則回 `/records`；刪除後仍回 `/records` | 返回分析頁時展開與捲動消失、不做「再顯示 N 筆」、清單金額 `$1,300`、design.md 不改，都是使用者決定 |
 | **B7a** ✅ | `initStorage` 單一入口：呼叫後保證完成一次完整執行，執行中再呼叫就排一輪、排隊前的呼叫合併；第 37 行寫回 `persistGranted` 改用 `updateSettings`（settings 中途被刪就初始化失敗）；還原後待確認紅點立刻更新 | 一支 API（推翻 research 原建議的兩支，chris 判斷、使用者同意）；冷啟動會跑兩輪，重新評估觸發點：真機冷啟動「準備中…」明顯變長；排隊等重讀時又有第三輪，failed 判斷可能漏掉第二輪的失敗，接受（觸發點：真機「還原完成」但資料沒載入） |
-| **backup-reminder** | 備份提醒橫幅補回記帳頁（Phase 7 `4045778` 刪 HomeView 時遺失）：從未備份且 ≥ 20 筆或距上次備份超過 7 天時顯示，點了進 `/backup`，沿用 Phase 6 文案與樣式；design.md §11.2「可一鍵匯出」改成「點橫幅進備份頁匯出」（iOS 手勢限制，使用者委託 chris 判定）；FEATURES 同步；頁面測試補上 7 天邊界與「等 persist 期間備份」 | 不做「稍後提醒」（使用者決定）；還原後立刻跳提醒見 ticket；App 從背景回來不會重新 mount，橫幅可能過期，重新評估觸發點：使用者回報提醒沒出現或沒消失 |
+| **backup-reminder** ✅ | 備份提醒橫幅補回記帳頁（Phase 7 `4045778` 刪 HomeView 時遺失）：從未備份且 ≥ 20 筆或距上次備份超過 7 天時顯示，點了進 `/backup`，沿用 Phase 6 文案與樣式；design.md §11.2「可一鍵匯出」改成「點橫幅進備份頁匯出」（iOS 手勢限制，使用者委託 chris 判定）；FEATURES 同步；頁面測試補上 7 天邊界與「等 persist 期間備份」 | 不做「稍後提醒」（使用者決定）；還原後立刻跳提醒見 ticket；App 從背景回來不會重新 mount，橫幅可能過期，重新評估觸發點：使用者回報提醒沒出現或沒消失 |
 | **B7b** | 沒在用的 port 與設定項（D4）：`RuleClassifier`／`ClassifierPort`、`merchantDictionary`／`merchantMatched`、沒人讀的設定鍵、`categoryCount`／`ruleCount` | 每一項刪除都要使用者本人同意，刪 `RuleClassifier`／`ClassifierPort` 偏離 design.md §6.4；`invoiceKey.ts` 自己的日期 regex（有 capture group）改共用 `dates.ts`，行為相同 |
 | **B7c** | 重複文案（「（無店家）」）與「待確認」的兩種意思（null 類別 vs `status: pending`） | 改名「未分類」要改 `PendingView.test.ts:242`、`backup.test.ts:111` 的斷言與 design.md:184，使用者本人決定 |
 | **B8** | 文件同步 | FEATURES.md:76「共 10 種」待確認原因（現在 11 種）、文件裡的測試數、design.md §3.7／§4.4 的新規則、「單價語意未定」的舊說法（FEATURES.md、`einvoicePayload.ts`、`invoiceService.ts`、`QuickInputView.vue:278-280`）、本文件「開發指令」的 CI 流程漏了 lint；編碼相關的舊說法：`FEATURES.md:136`「品項編碼已由實拍樣本確認是 UTF-8」、`design.md` §5.2.2「品項的編碼是 Base64 還是 Big5」、`design.md` §12〈#1 樣本可以延後到 Phase 9〉表格「QR 原始文字」那一列（還寫著「品項編碼…⏳ 仍缺」）、`qrDetect.ts:12` 的註解漏了 UTF-8 |
