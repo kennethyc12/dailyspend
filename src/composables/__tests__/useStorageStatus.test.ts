@@ -6,10 +6,8 @@ import type { Settings } from '@/models/types'
 import { initStorage, useStorageStatus } from '@/composables/useStorageStatus'
 import { updateSettings } from '@/services/settingsService'
 import { deferred } from '@/test/fixtures'
-import { failPutOn } from '@/test/mountView'
+import { EMPTY_ESTIMATE, failPutOn, holdPersist, stubStorageManager } from '@/test/mountView'
 import { clearErrors, useErrorLog } from '@/errors/errorLog'
-
-const EMPTY_ESTIMATE: StorageEstimate = { usage: 0, quota: 0 }
 
 let storage: IndexedDbAdapter
 
@@ -34,26 +32,11 @@ const state = () => useStorageStatus().state.value
 const saved = async () => (await storage.get<Settings>('settings', 'settings'))!
 const reportedWhere = () => useErrorLog().errors.value.map((e) => e.where)
 
-function stubStorageManager(s: Partial<StorageManager>) {
-  Object.defineProperty(navigator, 'storage', { configurable: true, value: s })
-}
-
 function holdEstimate() {
   const est = deferred<StorageEstimate>()
   const estimate = vi.fn(() => est.promise)
   stubStorageManager({ estimate })
   return { estimate, release: () => est.resolve(EMPTY_ESTIMATE) }
-}
-
-function holdPersist() {
-  const granted = deferred<boolean>()
-  const persist = vi.fn(() => granted.promise)
-  stubStorageManager({
-    persisted: async () => false,
-    persist,
-    estimate: async () => EMPTY_ESTIMATE,
-  })
-  return { persist, grant: () => granted.resolve(true) }
 }
 
 describe('initStorage：執行中再呼叫', () => {

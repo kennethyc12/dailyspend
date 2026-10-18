@@ -1,12 +1,28 @@
 // @vitest-environment jsdom
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { DOMWrapper } from '@vue/test-utils'
-import type { SpendRecord } from '@/models/types'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { DOMWrapper, VueWrapper } from '@vue/test-utils'
+import type { Settings, SpendRecord } from '@/models/types'
 import QuickInputView from '@/views/QuickInputView.vue'
+import BackupView from '@/views/BackupView.vue'
+import { router } from '@/router'
+import { saveFile } from '@/backup/share'
+import { markBackedUp } from '@/services/backupService'
+import { createFromText } from '@/services/entryService'
+import { updateSettings } from '@/services/settingsService'
+import { useStorageStatus } from '@/composables/useStorageStatus'
 import { compressPhoto } from '@/photo/compress'
 import { detectQrCodes, type DetectResult } from '@/recognize/qrDetect'
 import { leftQr, photoFromFile, REAL_B_RIGHT } from '@/test/fixtures'
-import { button, field, mountView, pickFile, settled, useViewTest, waitForText } from '@/test/mountView'
+import {
+  button,
+  field,
+  holdPersist,
+  mountView,
+  pickFile,
+  settled,
+  useViewTest,
+  waitForText,
+} from '@/test/mountView'
 import { clearErrors, useErrorLog } from '@/errors/errorLog'
 
 vi.mock('@/recognize/qrDetect', () => ({
@@ -16,6 +32,11 @@ vi.mock('@/recognize/qrDetect', () => ({
 
 vi.mock('@/photo/compress', () => ({
   compressPhoto: vi.fn(),
+}))
+
+vi.mock('@/backup/share', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/backup/share')>()),
+  saveFile: vi.fn(async () => 'downloaded' as const),
 }))
 
 const { storage } = useViewTest()
@@ -252,5 +273,116 @@ describe('記一筆：非預期錯誤（B5a）', () => {
     expect(errors.value[0]).toMatchObject({ source: 'manual', where: 'QuickInputView.submit' })
     expect(await storage().count('records')).toBe(0)
     clearErrors()
+  })
+})
+
+const DAY = 86_400_000
+// 虛構時間；fixture 不放真實時間
+const NOW = Date.UTC(2030, 0, 15, 4)
+
+describe('備份提醒', () => {
+  // useStorageStatus 是模組狀態：上一個測試留下的那一輪會把 needsBackup 寫到這裡
+  beforeEach(async () => {
+    await vi.waitFor(() => expect(useStorageStatus().state.value).not.toBe('running'))
+    // 不用 fake timers：vi.waitFor 會在每輪輪詢推進假時鐘，邊界測試要時間不動
+    vi.spyOn(Date, 'now').mockReturnValue(NOW)
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+    delete (navigator as { storage?: StorageManager }).storage
+  })
+
+  async function seedRecords(n: number) {
+    for (let i = 0; i < n; i++) await createFromText(storage(), `某店 ${i + 1}`)
+  }
+
+  const lastBackup = (at: number | null) =>
+    updateSettings(storage(), (s) => ({ ...s, backup: { ...s.backup, lastBackupAt: at } }))
+
+  /** 斷言「不出現」前必須先等這一輪跑完，否則看到的是上一個測試的值。 */
+  async function openEntry() {
+    const wrapper = await mountView(QuickInputView)
+    await settled(wrapper)
+    return wrapper
+  }
+
+  const banner = (w: VueWrapper) => w.find('.remind')
+
+  async function backupThenEntry(outcome: 'shared' | 'cancelled') {
+    await seedRecords(20)
+    vi.mocked(saveFile).mockResolvedValueOnce(outcome)
+    const backup = await mountView(BackupView, '/backup')
+    // preparing 期間按鈕文字是「準備中…」，button() 找不到會直接 throw，所以等 disabled
+    await vi.waitFor(() => expect(button(backup, '完整備份（zip）').element.disabled).toBe(false))
+    await button(backup, '完整備份（zip）').trigger('click')
+    if (outcome === 'shared') {
+      // 等不到就是 markBackedUp 沒被呼叫
+      await vi.waitFor(async () => {
+        const s = await storage().get<Settings>('settings', 'settings')
+        expect(s!.backup.lastBackupAt).not.toBeNull()
+      })
+    } else {
+      await waitForText(backup, '已取消')
+    }
+    return openEntry()
+  }
+
+  it('從未備份且累積 20 筆 → 顯示提醒，點了進備份頁', async () => {
+    await seedRecords(20)
+    const wrapper = await openEntry()
+
+    expect(banner(wrapper).exists()).toBe(true)
+    await banner(wrapper).trigger('click')
+    await vi.waitFor(() => expect(router.currentRoute.value.path).toBe('/backup'))
+  })
+
+  it('從未備份、19 筆 → 不提醒', async () => {
+    await seedRecords(19)
+    const wrapper = await openEntry()
+
+    expect(banner(wrapper).exists()).toBe(false)
+  })
+
+  it('上次備份剛好 7 天前 → 不提醒', async () => {
+    await lastBackup(NOW - 7 * DAY)
+    const wrapper = await openEntry()
+
+    expect(banner(wrapper).exists()).toBe(false)
+  })
+
+  it('上次備份超過 7 天 → 提醒', async () => {
+    await lastBackup(NOW - 7 * DAY - 1)
+    const wrapper = await openEntry()
+
+    expect(banner(wrapper).exists()).toBe(true)
+  })
+
+  it('完整備份之後回記帳頁 → 提醒消失', async () => {
+    const wrapper = await backupThenEntry('shared')
+
+    expect(banner(wrapper).exists()).toBe(false)
+  })
+
+  it('取消分享不算備份 → 仍然提醒', async () => {
+    const wrapper = await backupThenEntry('cancelled')
+
+    expect(banner(wrapper).exists()).toBe(true)
+  })
+
+  it('等 persist 期間在別頁完成備份 → 不提醒', async () => {
+    await seedRecords(20)
+    const { persist, grant } = holdPersist()
+    try {
+      const wrapper = await mountView(QuickInputView)
+      await vi.waitFor(() => expect(persist).toHaveBeenCalled())
+      await markBackedUp(storage())
+      grant()
+      await settled(wrapper)
+
+      expect(banner(wrapper).exists()).toBe(false)
+    } finally {
+      grant()
+    }
   })
 })

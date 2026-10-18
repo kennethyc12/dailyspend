@@ -1051,7 +1051,7 @@ IndexedDB 的寫入走 structured clone，而 **Proxy 不可複製**。把待還
 ### 11.2 備份提醒
 
 - 首次啟動呼叫 `navigator.storage.persist()`，結果存入 `settings.platform.persistGranted`，並顯示在設定頁（讓使用者知道自己的資料處於什麼保護等級）
-- `Date.now() - settings.backup.lastBackupAt > settings.backup.remindAfterDays (7) × 86400000` → 首頁顯示提醒橫幅，可一鍵匯出
+- `Date.now() - settings.backup.lastBackupAt > settings.backup.remindAfterDays (7) × 86400000` → 首頁顯示提醒橫幅，~~可一鍵匯出~~ 點橫幅進備份頁匯出（iOS 的 `navigator.share` 必須在使用者手勢內同步呼叫，首頁一鍵匯出得在每次進記帳頁時預先組整份 zip；backup-reminder，2026-10-18，使用者委託 chris 判定）
 - 從未備份過且紀錄數 ≥ 20 → 同樣顯示
 
 ### 11.3 載具 CSV 匯入：發票存摺格式（C1 補定，2026-10-13）

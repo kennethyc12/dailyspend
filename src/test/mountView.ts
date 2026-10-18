@@ -6,6 +6,7 @@ import { IndexedDbAdapter, seed, setStorage } from '@/storage'
 import { seedBuiltinRules } from '@/services/ruleService'
 import { router } from '@/router'
 import { clearErrors, useErrorLog } from '@/errors/errorLog'
+import { deferred } from '@/test/fixtures'
 
 const mounted: VueWrapper[] = []
 
@@ -108,4 +109,22 @@ export function failPutOn(storeName: string) {
     if (this.name === storeName) throw new DOMException('quota', 'QuotaExceededError')
     return real.apply(this, args)
   })
+}
+
+export const EMPTY_ESTIMATE: StorageEstimate = { usage: 0, quota: 0 }
+
+/** jsdom 沒有 navigator.storage；呼叫端要在 afterEach `delete navigator.storage`。 */
+export function stubStorageManager(s: Partial<StorageManager>) {
+  Object.defineProperty(navigator, 'storage', { configurable: true, value: s })
+}
+
+export function holdPersist() {
+  const granted = deferred<boolean>()
+  const persist = vi.fn(() => granted.promise)
+  stubStorageManager({
+    persisted: async () => false,
+    persist,
+    estimate: async () => EMPTY_ESTIMATE,
+  })
+  return { persist, grant: () => granted.resolve(true) }
 }

@@ -138,7 +138,7 @@ iPhone 上要從**主畫面圖示**開啟，不要用 Safari 分頁（App 會擋
 - 還原**強制兩步驟**：`prepareRestore()` 會一併產出當前資料的保險備份，
   存下它之前「確認覆寫」按鈕是 disabled
 - Web Share 優先，`AbortError` 視為取消而非失敗，其他錯誤退回 `<a download>`
-- 7 天備份提醒；從未備份時累積到 20 筆才開始提醒（Phase 7 `4045778` 起畫面上消失，見〈審閱後的修正批次〉backup-reminder）
+- 7 天備份提醒；從未備份時累積到 20 筆才開始提醒（Phase 7 `4045778` 起畫面上消失，backup-reminder 補回）
 - `StoragePort` 補上 `clear()`
 - **26 個測試全過**，含完整來回（匯出 → 清空資料庫 → 還原後照片位元組一致）
 
@@ -439,12 +439,12 @@ v1 的程式寫完了。接下來最有價值的不是寫功能，是**讓真實
 | **B6a** ✅ | 分析門檻範圍：`THRESHOLD_RANGES`（全部整數）；分析頁寫入時擋下範圍外、小數與空白並說明；`migrateSettings` 把已存的壞值夾回範圍（修好「最少連續月數存成 0 後分析頁永久打不開」，含還原進來的壞值）；規則見 design.md §8 | B6 拆成 B6a／B6b、範圍值、還原帶字串退回預設都是使用者決定；`analyze` 不改 |
 | **B6b** ✅ | 分析：佐證紀錄就地展開（`FindingItem`，日期新到舊、連到編輯頁，`kind:title` 當 key）；編輯頁「← 返回」有站內上一頁就 `router.back()`，否則回 `/records`；刪除後仍回 `/records` | 返回分析頁時展開與捲動消失、不做「再顯示 N 筆」、清單金額 `$1,300`、design.md 不改，都是使用者決定 |
 | **B7a** ✅ | `initStorage` 單一入口：呼叫後保證完成一次完整執行，執行中再呼叫就排一輪、排隊前的呼叫合併；第 37 行寫回 `persistGranted` 改用 `updateSettings`（settings 中途被刪就初始化失敗）；還原後待確認紅點立刻更新 | 一支 API（推翻 research 原建議的兩支，chris 判斷、使用者同意）；冷啟動會跑兩輪，重新評估觸發點：真機冷啟動「準備中…」明顯變長；排隊等重讀時又有第三輪，failed 判斷可能漏掉第二輪的失敗，接受（觸發點：真機「還原完成」但資料沒載入） |
-| **backup-reminder** | 備份提醒橫幅：design.md §11.2 規定首頁要顯示，Phase 6 做在 `HomeView`，Phase 7（`4045778`）刪掉 HomeView 時沒搬，從此沒有畫面讀 `needsBackup` | 不另開 ticket，本列就是唯一來源；§11.2「一鍵匯出」照舊做成連結還是改規格，留到這批決定；FEATURES.md 備份表格「提醒」列寫成已完成，在這批或 B8 一起更正 |
+| **backup-reminder** | 備份提醒橫幅補回記帳頁（Phase 7 `4045778` 刪 HomeView 時遺失）：從未備份且 ≥ 20 筆或距上次備份超過 7 天時顯示，點了進 `/backup`，沿用 Phase 6 文案與樣式；design.md §11.2「可一鍵匯出」改成「點橫幅進備份頁匯出」（iOS 手勢限制，使用者委託 chris 判定）；FEATURES 同步；頁面測試補上 7 天邊界與「等 persist 期間備份」 | 不做「稍後提醒」（使用者決定）；還原後立刻跳提醒見 ticket；App 從背景回來不會重新 mount，橫幅可能過期，重新評估觸發點：使用者回報提醒沒出現或沒消失 |
 | **B7b** | 沒在用的 port 與設定項（D4）：`RuleClassifier`／`ClassifierPort`、`merchantDictionary`／`merchantMatched`、沒人讀的設定鍵、`categoryCount`／`ruleCount` | 每一項刪除都要使用者本人同意，刪 `RuleClassifier`／`ClassifierPort` 偏離 design.md §6.4；`invoiceKey.ts` 自己的日期 regex（有 capture group）改共用 `dates.ts`，行為相同 |
 | **B7c** | 重複文案（「（無店家）」）與「待確認」的兩種意思（null 類別 vs `status: pending`） | 改名「未分類」要改 `PendingView.test.ts:242`、`backup.test.ts:111` 的斷言與 design.md:184，使用者本人決定 |
 | **B8** | 文件同步 | FEATURES.md:76「共 10 種」待確認原因（現在 11 種）、文件裡的測試數、design.md §3.7／§4.4 的新規則、「單價語意未定」的舊說法（FEATURES.md、`einvoicePayload.ts`、`invoiceService.ts`、`QuickInputView.vue:278-280`）、本文件「開發指令」的 CI 流程漏了 lint；編碼相關的舊說法：`FEATURES.md:136`「品項編碼已由實拍樣本確認是 UTF-8」、`design.md` §5.2.2「品項的編碼是 Base64 還是 Big5」、`design.md` §12〈#1 樣本可以延後到 Phase 9〉表格「QR 原始文字」那一列（還寫著「品項編碼…⏳ 仍缺」）、`qrDetect.ts:12` 的註解漏了 UTF-8 |
 
-另外二十二張 ticket：
+另外二十三張 ticket：
 - 返回分析頁時展開與捲動消失：從佐證清單點進一筆再「← 返回」，清單收合、可能回到頁首（沒有 `keep-alive`、`scrollBehavior`）。使用者 2026-10-17 決定接受。觸發點：真機回報看完一筆回來找不到原本那條
 - 「（無店家）」文案在 7 處重複（RecordsView、PendingView、BackupView×2、QuickInputView×2、FindingItem）。觸發點：這段文案要改時
 - `RecordEditView.test.ts`「略過逐項指定」在全套 `--sequence.shuffle` 下偶發失敗（chris 審 B6a 時 20 次紅 2 次；base `22e2cbf` 跑 6 次未重現，推測是既有時序問題，與 B6a 無關）。B6b 審閱時補充：單檔 30 seeds 紅 5 次，「逐項指定分類」也會紅，失敗的都排在檔內第 1～2 位，base `edb94f3` 同樣重現；推測是第一個測試冷啟動超過 `waitFor` 的 1000ms。觸發點：CI 或一般執行也紅
@@ -467,6 +467,7 @@ v1 的程式寫完了。接下來最有價值的不是寫功能，是**讓真實
 - 「用發票資料存檔」沒有檢查儲存層是否初始化完成（文字的「存檔」有檢查 `state !== 'ready'`）。機率低，只記錄
 - 重跑時記憶體 settings 被蓋回：`runInit` 的 `settings.value = current` 在 `requestPersist` 之後才執行，這段期間在設定頁改了照片壓縮，記憶體裡的值會被蓋回舊的（DB 是對的）。觸發點：真機回報照片壓縮欄位跳回舊值
 - 備份頁不等初始化：`BackupView` 的 `onMounted(prepareFiles)` 不等 `initStorage`，首次安裝後直接冷啟動進 `/backup` 時，匯出檔可能在 seed 之前就組好。機率極低。觸發點：使用者回報第一次的匯出檔是空的
+- 還原後立刻跳提醒：備份檔裡的 `lastBackupAt` 是匯出前的值（`markBackedUp` 在匯出之後才寫），`restoreBackup` 整份覆蓋 settings，所以用最新備份還原後可能馬上顯示「該備份了」。使用者 2026-10-18 決定接受。觸發點：真機遇到時覺得吵
 
 已評估、未採用：沒有總計額時用品項加總帶入金額（見 design.md §5.3 的觸發點）。
 

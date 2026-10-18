@@ -15,7 +15,7 @@ import { handleError } from '@/errors/handleError'
 
 const storage = getStorage()
 const { records } = useRecords()
-const { state } = useStorageStatus()
+const { state, needsBackup } = useStorageStatus()
 const picker = usePhotoPicker()
 
 const text = ref('')
@@ -206,6 +206,10 @@ async function submitSample() {
   <main class="page">
     <h1>記一筆</h1>
 
+    <RouterLink v-if="needsBackup" to="/backup" class="remind">
+      該備份了 — 資料只存在這支手機上，點這裡匯出一份
+    </RouterLink>
+
     <form v-if="!invoice" @submit.prevent="submit">
       <input
         v-model="text"
@@ -375,6 +379,17 @@ async function submitSample() {
 </template>
 
 <style scoped>
+.remind {
+  display: block;
+  margin-bottom: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius);
+  background: var(--c-accent-dim);
+  color: var(--c-text);
+  font-size: 14px;
+  text-decoration: none;
+}
+
 .entry {
   width: 100%;
   padding: var(--space-4);
