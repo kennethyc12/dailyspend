@@ -56,6 +56,7 @@
 | settings-write | settings 寫入讀新鮮值，分析頁寫入成功才更新畫面 | ✅ | ✅ | 2026-10-17 真機驗收通過：分析頁改門檻後重新進頁仍保留、設定頁快速連改照片壓縮三欄重新進頁都保留、備份後「上次備份」更新 |
 | B6a | 分析門檻合法範圍、無效輸入提示、修回已存的壞值 | ✅ | ✅ | 2026-10-17 真機驗收通過：分析頁正常打開、清空最少連續月數出現範圍提示且值不變不跳橫幅、建議條數 0 被擋、增幅門檻 0 存得進去、其他門檻照常保留 |
 | B6b | 分析頁佐證紀錄就地展開、連到編輯頁；編輯頁返回回到原頁 | ✅ | ✅ | 2026-10-17 真機驗收通過：依據可展開與收合且日期新到舊、點進編輯頁後返回回到分析頁、從紀錄頁進來返回紀錄頁、重開後返回紀錄頁、刪除後到紀錄頁、依據那一行外觀不變 |
+| B7a | `initStorage` 呼叫後保證完成一次完整執行、寫回 persistGranted 不蓋掉並行寫入、還原後紅點立刻更新 | ✅ | ✅ | 2026-10-18 真機驗收通過：冷啟動直接進分析頁正常、記一筆「準備中…」沒有明顯變長、備份後上次備份更新、還原含待確認的備份後紅點立刻正確 |
 
 ---
 
@@ -342,6 +343,8 @@ CI 加上 `npm run lint`，`package.json` 加上 `engines: node >=22`。
 ### Commit 紀錄
 
 ```
+5e828fb fix(b7a): initStorage 呼叫後保證完成一次完整執行，寫回 persistGranted 不再蓋掉並行寫入，還原後紅點立刻更新
+851d107 記錄 B6b 真機確認通過
 85c3363 feat(b6b): 分析頁的佐證紀錄可以展開並點進編輯頁，編輯頁返回回到原頁
 edb94f3 記錄 B6a 真機確認通過
 543dee4 fix(b6a): 分析門檻加上合法範圍，擋下無效輸入並修回已存的壞值
@@ -435,7 +438,7 @@ v1 的程式寫完了。接下來最有價值的不是寫功能，是**讓真實
 | **settings-write** ✅ | 分析頁門檻樂觀更新 ticket：`updateSettings` 在單一 transaction 讀新鮮 settings 再寫（`markBackedUp` 改用它）；分析頁寫入成功才更新畫面；設定頁照片壓縮指派回傳值、不再靠 `initStorage` 重讀（刪 `toRaw`）；兩頁開頭清 `errorMsg` | 偏離 B5b「存完靠 `initStorage` 重讀」、存檔完成時會重設正在輸入的其他欄位，都是使用者同意；`initStorage` 第 37 行先讀再寫留給 B7 |
 | **B6a** ✅ | 分析門檻範圍：`THRESHOLD_RANGES`（全部整數）；分析頁寫入時擋下範圍外、小數與空白並說明；`migrateSettings` 把已存的壞值夾回範圍（修好「最少連續月數存成 0 後分析頁永久打不開」，含還原進來的壞值）；規則見 design.md §8 | B6 拆成 B6a／B6b、範圍值、還原帶字串退回預設都是使用者決定；`analyze` 不改 |
 | **B6b** ✅ | 分析：佐證紀錄就地展開（`FindingItem`，日期新到舊、連到編輯頁，`kind:title` 當 key）；編輯頁「← 返回」有站內上一頁就 `router.back()`，否則回 `/records`；刪除後仍回 `/records` | 返回分析頁時展開與捲動消失、不做「再顯示 N 筆」、清單金額 `$1,300`、design.md 不改，都是使用者決定 |
-| **B7a** | `initStorage` 單一入口：呼叫後保證完成一次完整執行，執行中再呼叫就排一輪、排隊前的呼叫合併；第 37 行寫回 `persistGranted` 改用 `updateSettings`（settings 中途被刪就初始化失敗）；還原後待確認紅點立刻更新 | 一支 API（推翻 research 原建議的兩支，chris 代決）；冷啟動會跑兩輪，重新評估觸發點：真機冷啟動「準備中…」明顯變長；排隊等重讀時又有第三輪，failed 判斷可能漏掉第二輪的失敗，接受（觸發點：真機「還原完成」但資料沒載入） |
+| **B7a** ✅ | `initStorage` 單一入口：呼叫後保證完成一次完整執行，執行中再呼叫就排一輪、排隊前的呼叫合併；第 37 行寫回 `persistGranted` 改用 `updateSettings`（settings 中途被刪就初始化失敗）；還原後待確認紅點立刻更新 | 一支 API（推翻 research 原建議的兩支，chris 判斷、使用者同意）；冷啟動會跑兩輪，重新評估觸發點：真機冷啟動「準備中…」明顯變長；排隊等重讀時又有第三輪，failed 判斷可能漏掉第二輪的失敗，接受（觸發點：真機「還原完成」但資料沒載入） |
 | **backup-reminder** | 備份提醒橫幅：design.md §11.2 規定首頁要顯示，Phase 6 做在 `HomeView`，Phase 7（`4045778`）刪掉 HomeView 時沒搬，從此沒有畫面讀 `needsBackup` | 不另開 ticket，本列就是唯一來源；§11.2「一鍵匯出」照舊做成連結還是改規格，留到這批決定；FEATURES.md 備份表格「提醒」列寫成已完成，在這批或 B8 一起更正 |
 | **B7b** | 沒在用的 port 與設定項（D4）：`RuleClassifier`／`ClassifierPort`、`merchantDictionary`／`merchantMatched`、沒人讀的設定鍵、`categoryCount`／`ruleCount` | 每一項刪除都要使用者本人同意，刪 `RuleClassifier`／`ClassifierPort` 偏離 design.md §6.4；`invoiceKey.ts` 自己的日期 regex（有 capture group）改共用 `dates.ts`，行為相同 |
 | **B7c** | 重複文案（「（無店家）」）與「待確認」的兩種意思（null 類別 vs `status: pending`） | 改名「未分類」要改 `PendingView.test.ts:242`、`backup.test.ts:111` 的斷言與 design.md:184，使用者本人決定 |
