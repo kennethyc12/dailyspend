@@ -4,6 +4,7 @@ import { loadActiveRules, seedBuiltinRules } from '@/services/ruleService'
 import { shouldRemindBackup } from '@/services/backupService'
 import type { Category, Settings } from '@/models/types'
 import { reportError } from '@/errors/errorLog'
+import { updateSettings } from '@/services/settingsService'
 
 export type InitState = 'idle' | 'running' | 'ready' | 'failed'
 
@@ -17,8 +18,31 @@ const settings = ref<Settings | null>(null)
 const persistGranted = ref<boolean | null>(null)
 const usage = ref<{ usage: number; quota: number | null } | null>(null)
 
-export async function initStorage() {
-  if (state.value === 'running') return
+let running: Promise<void> | null = null
+let queued: Promise<void> | null = null
+
+/**
+ * 呼叫後保證完成一次完整執行：寫入後要重讀的呼叫端不能拿到寫入前那一輪的結果。
+ * 執行中再呼叫就排一輪，排隊那一輪開始前的呼叫都併進它。
+ */
+export function initStorage(): Promise<void> {
+  if (queued) return queued
+  if (!running) {
+    running = runInit().finally(() => {
+      running = null
+    })
+    return running
+  }
+  // runInit 不會 reject（catch-all），兩路都接是為了不讓 queued 卡死
+  const rerun = () => {
+    queued = null
+    return initStorage()
+  }
+  queued = running.then(rerun, rerun)
+  return queued
+}
+
+async function runInit() {
   state.value = 'running'
   error.value = null
 
@@ -31,17 +55,22 @@ export async function initStorage() {
     const granted = (await storage.isPersisted()) || (await storage.requestPersist())
     persistGranted.value = granted
 
+    let current = loaded
     if (loaded.platform.persistGranted !== granted) {
-      loaded.platform.persistGranted = granted
-      loaded.updatedAt = Date.now()
-      await storage.put('settings', loaded)
+      // requestPersist 期間其他頁可能寫了 settings，不能拿 loaded 整份寫回
+      const saved = await updateSettings(storage, (s) => ({
+        ...s,
+        platform: { ...s.platform, persistGranted: granted },
+      }))
+      if (!saved) throw new Error('settings 在初始化途中被刪除')
+      current = saved
     }
 
-    settings.value = loaded
+    settings.value = current
     categoryCount.value = (await storage.getAll<Category>('categories')).length
     ruleCount.value = (await loadActiveRules(storage)).length
     recordCount.value = await storage.count('records')
-    needsBackup.value = shouldRemindBackup(loaded, recordCount.value)
+    needsBackup.value = shouldRemindBackup(current, recordCount.value)
     usage.value = await storage.estimateUsage()
     state.value = 'ready'
   } catch (e) {

@@ -114,3 +114,9 @@ export const REAL_PASSBOOK_CSV = `\uFEFF${CARRIER_HEADER_LINE}
 2026/08/24 19:02:37,ZZ00000008,測試餐廳股份有限公司,77777777,雞腿堡,279,1,279,,
 2026/08/24 19:02:37,ZZ00000008,測試餐廳股份有限公司,77777777,服務費,17,1,17,,
 `
+
+export function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((r) => (resolve = r))
+  return { promise, resolve }
+}

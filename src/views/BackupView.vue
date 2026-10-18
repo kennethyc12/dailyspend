@@ -322,6 +322,7 @@ async function confirmRestore() {
       return
     }
     await prepareFiles()
+    await refreshRecords()
     message.value = `還原完成，共 ${count} 筆紀錄`
   } finally {
     restoring.value = false

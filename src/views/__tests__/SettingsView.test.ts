@@ -7,7 +7,7 @@ import type { Rule, Settings } from '@/models/types'
 import { IndexedDbAdapter, setStorage } from '@/storage'
 import { learnItemRule } from '@/services/entryService'
 import { saveSample } from '@/services/sampleService'
-import { photoFromFile } from '@/test/fixtures'
+import { deferred, photoFromFile } from '@/test/fixtures'
 import { button, failPutOn, field, mountView, useViewTest, waitForText } from '@/test/mountView'
 import { clearErrors, useErrorLog } from '@/errors/errorLog'
 import { useStorageStatus } from '@/composables/useStorageStatus'
@@ -50,12 +50,6 @@ const savedQuality = async () =>
   (await storage().get<Settings>('settings', 'settings'))!.photo.quality
 
 const saved = async () => (await storage().get<Settings>('settings', 'settings'))!
-
-function deferred<T>() {
-  let resolve!: (value: T) => void
-  const promise = new Promise<T>((r) => (resolve = r))
-  return { promise, resolve }
-}
 
 describe('設定頁：既有行為', () => {
   it('停用內建規則，重新進頁仍是停用', async () => {

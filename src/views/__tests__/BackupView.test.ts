@@ -3,13 +3,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { nextTick } from 'vue'
 import type { VueWrapper } from '@vue/test-utils'
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate'
-import type { SpendRecord } from '@/models/types'
+import type { Settings, SpendRecord } from '@/models/types'
 import BackupView from '@/views/BackupView.vue'
 import { BACKUP_FORMAT_VERSION, createBackup } from '@/backup/backup'
 import { createFromText } from '@/services/entryService'
 import { button, mountView, pickFile, useViewTest, waitForText } from '@/test/mountView'
-import { carrierCsv, type CarrierRowOptions } from '@/test/fixtures'
-import { initStorage } from '@/composables/useStorageStatus'
+import { carrierCsv, deferred, type CarrierRowOptions } from '@/test/fixtures'
+import { initStorage, useStorageStatus } from '@/composables/useStorageStatus'
 import { pendingRecords, refreshRecords } from '@/composables/useRecords'
 import { todayIso } from '@/parsing/quickInput'
 import { saveFile } from '@/backup/share'
@@ -283,4 +283,56 @@ describe('載具 CSV 匯入', () => {
   it.todo('commit 成功但重新整理失敗 → 不說「資料未變更」')
   // prepare 在 iPhone 上要好幾秒，但測試裡抓不穩它執行中的時間點。
   it.todo('匯入預覽計算中 → 還原選檔停用')
+})
+
+describe('寫入後重讀（B7a）', () => {
+  async function zipOf(): Promise<File> {
+    const bytes = new Uint8Array(await (await createBackup(storage())).arrayBuffer())
+    return new File([bytes], 'b.zip', { type: 'application/zip' })
+  }
+
+  it('初始化執行中按完整備份，上次備份仍會更新', async () => {
+    await initStorage()
+    const wrapper = await mountView(BackupView, '/backup')
+    await waitForText(wrapper, '完整備份（zip）')
+    expect(wrapper.text()).toContain('上次備份：從未備份')
+
+    const est = deferred<StorageEstimate>()
+    const estimate = vi.fn(() => est.promise)
+    Object.defineProperty(navigator, 'storage', { configurable: true, value: { estimate } })
+    void initStorage()
+    try {
+      await vi.waitFor(() => expect(estimate).toHaveBeenCalledTimes(1))
+      await button(wrapper, '完整備份（zip）').trigger('click')
+      // 「備份已下載」早於 markBackedUp，要等 DB 寫完，exportBackup 才會接著呼叫 initStorage
+      await vi.waitFor(async () => {
+        const s = await storage().get<Settings>('settings', 'settings')
+        expect(s!.backup.lastBackupAt).not.toBeNull()
+      })
+      est.resolve({ usage: 0, quota: 0 })
+      await vi.waitFor(() => expect(wrapper.text()).not.toContain('從未備份'))
+    } finally {
+      est.resolve({ usage: 0, quota: 0 })
+      await vi.waitFor(() => expect(useStorageStatus().state.value).not.toBe('running'))
+      delete (navigator as { storage?: StorageManager }).storage
+    }
+  })
+
+  it('還原後待確認清單立刻更新', async () => {
+    await createFromText(storage(), '某店 55')
+    const zip = await zipOf()
+    await storage().clear('records')
+    await refreshRecords()
+    expect(pendingRecords.value).toHaveLength(0)
+
+    const wrapper = await mountView(BackupView, '/backup')
+    await pickFile(wrapper.find<HTMLInputElement>('input[accept=".zip,application/zip"]'), zip)
+    await waitForText(wrapper, '② 確認覆寫並還原')
+    await button(wrapper, '① 先存下目前資料的保險備份').trigger('click')
+    await waitForText(wrapper, '已存下保險備份')
+    await button(wrapper, '② 確認覆寫並還原').trigger('click')
+    await waitForText(wrapper, '還原完成')
+
+    expect(pendingRecords.value).toHaveLength(1)
+  })
 })
