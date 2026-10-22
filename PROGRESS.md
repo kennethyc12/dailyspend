@@ -61,6 +61,7 @@
 | B7b | 刪沒在用的 port 與設定項（D4），`invoiceKey` 改用共用日期檢查 | ✅ | ✅ | 2026-10-22 真機驗收通過：記一筆文字存檔、分析頁、設定頁、匯出備份正常，錯誤紀錄沒有新增 |
 | B7c | 「（無店家）」抽常數；沒有類別的紀錄改叫「未分類」，「待確認」只指狀態 | ✅ | ✅ | 2026-10-22 真機驗收通過：待確認卡「確認（目前為 未分類）」、確認後紀錄頁只剩「未分類」、待確認中顯示「未分類 · 待確認」、搜「未分類」找得到、CSV 類別欄是「未分類」、「（無店家）」照常顯示 |
 | B8 | 文件、註解與畫面提示對齊現況 | ✅ | ✅ | 2026-10-22 真機驗收通過：記一筆沒有總計額的發票顯示新提示、斷行正常；QR 實驗室頁說明文字是新說法 |
+| same-name-items | 編輯品項時同名品項各自保留數量、金額與分類 | ✅ | ✅ | 2026-10-23 真機驗收通過：載具匯入含同名品項的紀錄加一行品項後，兩個同名品項的數量與金額不變 |
 
 ---
 
@@ -347,6 +348,8 @@ CI 加上 `npm run lint`，`package.json` 加上 `engines: node >=22`。
 ### Commit 紀錄
 
 ```
+5895a0e 記錄 B8 真機確認通過
+29abfb5 fix(same-name-items): 編輯品項時同名品項各自保留數量、金額與分類
 333a9ac 記錄 B7c 真機確認通過
 fa21d8b docs(b8): 文件、註解與畫面提示對齊現況
 fcbaab7 記錄 B7b 真機確認通過
@@ -456,6 +459,7 @@ v1 的程式寫完了。接下來最有價值的不是寫功能，是**讓真實
 | **B7b** ✅ | 刪 `RuleClassifier`／`ClassifierPort`（偏離 design.md §6.4，使用者同意）、店家字典 `merchantDictionary`／`merchantMatched`、沒有讀取者的設定鍵（`defaults.date`、`defaults.categoryFallback`、`parsing`、`export.encoding`、`repeatPurchase.similarity`）、`categoryCount`／`ruleCount`；`invoiceKey.ts` 改用 `dates.ts` 的 `isValidIsoDate`／`parseIso`；守門測試：帶舊鍵的 settings 第一次 seed 之後不再寫回；`RecognizerPort` 只在文件標「已評估、未採用」 | 不做 migration，舊裝置與備份檔殘留舊鍵、帶舊鍵的裝置第一次開啟寫回 settings 1 次；`close`、`confirmRecord`、`toIdbRange` 轉出、`runBlobRoundTrip`、`isStandardInvoiceNumber` 記成「死 code 清點」ticket |
 | **B7c** ✅ | 「（無店家）」7 處改用 `src/models/labels.ts` 的 `NO_MERCHANT`；`categoryId === null` 在畫面與 CSV 改叫「未分類」（`UNCATEGORIZED`），「待確認」只指 `status: pending`；`analyze.ts` 的 `nameOf` 只收 `string`、刪掉走不到的 null 分支；新增 `RecordsView.test.ts`；改 `PendingView.test.ts:242`、`backup.test.ts:109-111` 與 design.md:190（使用者同意） | **使用者可見**：CSV 類別欄的值從「待確認」改為「未分類」，舊匯出檔不會改寫；紀錄頁搜「待確認」不再找到沒有類別的紀錄（搜尋本來就不比對狀態）。null 類別仍是 `warn` 樣式。「null → 標籤」兩份實作記 ticket |
 | **B8** ✅ | 文件同步：待確認原因 11 種、design.md §3.7／§4.4 補 `tokens_after_amount`；單價不加總的理由改成「沒有總計額時無法核對品項是否齊全」（FEATURES、註解、記一筆提示、測試名稱）；編碼與合規樣本現況；FEATURES〈數字〉表標統計日期、README 拿掉測試數；開發指令補 lint；清單外同類舊說法一併改（README:27、PROGRESS 現況段、QR 實驗室頁說明） | 〈數字〉表每批都會過時，已標統計日期與 commit；若之後每批都要更新，再考慮刪表 |
+| **same-name-items** ✅ | `computeRecordUpdate` 原本用品名建 Map 對回舊品項，同名品項全拿到最後一個的值；改用 `matchItems`（頭尾相同的依位置，中段同名的依舊順序，相鄰同名刪一個保留前面那個）；design.md:979 與 `RecordPatch.itemNames` 註解對齊實況 | **修正前編輯過同名品項的紀錄不會自動修復**；QR 品名頭尾空白、「同名保留 categoryId」與重分類不一致另記 ticket |
 
 另外二十五張 ticket：
 - 返回分析頁時展開與捲動消失：從佐證清單點進一筆再「← 返回」，清單收合、可能回到頁首（沒有 `keep-alive`、`scrollBehavior`）。使用者 2026-10-17 決定接受。觸發點：真機回報看完一筆回來找不到原本那條
