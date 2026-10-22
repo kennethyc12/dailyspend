@@ -59,6 +59,7 @@
 | B7a | `initStorage` 呼叫後保證完成一次完整執行、寫回 persistGranted 不蓋掉並行寫入、還原後紅點立刻更新 | ✅ | ✅ | 2026-10-18 真機驗收通過：冷啟動直接進分析頁正常、記一筆「準備中…」沒有明顯變長、備份後上次備份更新、還原含待確認的備份後紅點立刻正確 |
 | backup-reminder | 記帳頁補回備份提醒橫幅（Phase 7 起遺失），點了進備份頁 | ✅ | ✅ | 2026-10-18 真機驗收通過：符合條件時記帳頁出現橫幅、點了進備份頁、完整備份後回記帳頁消失、取消分享時仍在、亮色暗色都清楚 |
 | B7b | 刪沒在用的 port 與設定項（D4），`invoiceKey` 改用共用日期檢查 | ✅ | ✅ | 2026-10-22 真機驗收通過：記一筆文字存檔、分析頁、設定頁、匯出備份正常，錯誤紀錄沒有新增 |
+| B7c | 「（無店家）」抽常數；沒有類別的紀錄改叫「未分類」，「待確認」只指狀態 | ✅ | ✅ | 2026-10-22 真機驗收通過：待確認卡「確認（目前為 未分類）」、確認後紀錄頁只剩「未分類」、待確認中顯示「未分類 · 待確認」、搜「未分類」找得到、CSV 類別欄是「未分類」、「（無店家）」照常顯示 |
 
 ---
 
@@ -345,6 +346,9 @@ CI 加上 `npm run lint`，`package.json` 加上 `engines: node >=22`。
 ### Commit 紀錄
 
 ```
+fcbaab7 記錄 B7b 真機確認通過
+a505305 refactor(b7c): 「（無店家）」抽成 NO_MERCHANT 常數
+60ce50b fix(b7c): 沒有類別的紀錄改叫「未分類」，「待確認」只指狀態
 f97790a 記錄 backup-reminder 真機確認通過
 251c731 refactor(b7b): 刪掉沒在用的 port 與設定項（D4），invoiceKey 改用共用日期檢查
 a5b1b19 fix(backup-reminder): 記帳頁補回備份提醒橫幅，點了進備份頁
@@ -447,7 +451,7 @@ v1 的程式寫完了。接下來最有價值的不是寫功能，是**讓真實
 | **B7a** ✅ | `initStorage` 單一入口：呼叫後保證完成一次完整執行，執行中再呼叫就排一輪、排隊前的呼叫合併；第 37 行寫回 `persistGranted` 改用 `updateSettings`（settings 中途被刪就初始化失敗）；還原後待確認紅點立刻更新 | 一支 API（推翻 research 原建議的兩支，chris 判斷、使用者同意）；冷啟動會跑兩輪，重新評估觸發點：真機冷啟動「準備中…」明顯變長；排隊等重讀時又有第三輪，failed 判斷可能漏掉第二輪的失敗，接受（觸發點：真機「還原完成」但資料沒載入） |
 | **backup-reminder** ✅ | 備份提醒橫幅補回記帳頁（Phase 7 `4045778` 刪 HomeView 時遺失）：從未備份且 ≥ 20 筆或距上次備份超過 7 天時顯示，點了進 `/backup`，沿用 Phase 6 文案與樣式；design.md §11.2「可一鍵匯出」改成「點橫幅進備份頁匯出」（iOS 手勢限制，使用者委託 chris 判定）；FEATURES 同步；頁面測試補上 7 天邊界與「等 persist 期間備份」 | 不做「稍後提醒」（使用者決定）；還原後立刻跳提醒見 ticket；App 從背景回來不會重新 mount，橫幅可能過期，重新評估觸發點：使用者回報提醒沒出現或沒消失 |
 | **B7b** ✅ | 刪 `RuleClassifier`／`ClassifierPort`（偏離 design.md §6.4，使用者同意）、店家字典 `merchantDictionary`／`merchantMatched`、沒有讀取者的設定鍵（`defaults.date`、`defaults.categoryFallback`、`parsing`、`export.encoding`、`repeatPurchase.similarity`）、`categoryCount`／`ruleCount`；`invoiceKey.ts` 改用 `dates.ts` 的 `isValidIsoDate`／`parseIso`；守門測試：帶舊鍵的 settings 第一次 seed 之後不再寫回；`RecognizerPort` 只在文件標「已評估、未採用」 | 不做 migration，舊裝置與備份檔殘留舊鍵、帶舊鍵的裝置第一次開啟寫回 settings 1 次；`close`、`confirmRecord`、`toIdbRange` 轉出、`runBlobRoundTrip`、`isStandardInvoiceNumber` 記成「死 code 清點」ticket |
-| **B7c** | 重複文案（「（無店家）」）與「待確認」的兩種意思（null 類別 vs `status: pending`） | 改名「未分類」要改 `PendingView.test.ts:242`、`backup.test.ts:111` 的斷言與 design.md:190，使用者本人決定 |
+| **B7c** ✅ | 「（無店家）」7 處改用 `src/models/labels.ts` 的 `NO_MERCHANT`；`categoryId === null` 在畫面與 CSV 改叫「未分類」（`UNCATEGORIZED`），「待確認」只指 `status: pending`；`analyze.ts` 的 `nameOf` 只收 `string`、刪掉走不到的 null 分支；新增 `RecordsView.test.ts`；改 `PendingView.test.ts:242`、`backup.test.ts:109-111` 與 design.md:190（使用者同意） | **使用者可見**：CSV 類別欄的值從「待確認」改為「未分類」，舊匯出檔不會改寫；紀錄頁搜「待確認」不再找到沒有類別的紀錄（搜尋本來就不比對狀態）。null 類別仍是 `warn` 樣式。「null → 標籤」兩份實作記 ticket |
 | **B8** | 文件同步 | FEATURES.md:76「共 10 種」待確認原因（現在 11 種）、文件裡的測試數、design.md §3.7／§4.4 的新規則、「單價語意未定」的舊說法（FEATURES.md、`einvoicePayload.ts`、`invoiceService.ts`、`QuickInputView.vue:278-280`）、本文件「開發指令」的 CI 流程漏了 lint；編碼相關的舊說法：`FEATURES.md:136`「品項編碼已由實拍樣本確認是 UTF-8」、`design.md` §5.2.2「品項的編碼是 Base64 還是 Big5」、`design.md` §12〈#1 樣本可以延後到 Phase 9〉表格「QR 原始文字」那一列（還寫著「品項編碼…⏳ 仍缺」）、`qrDetect.ts:12` 的註解漏了 UTF-8 |
 
 另外二十四張 ticket：
