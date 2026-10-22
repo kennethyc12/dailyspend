@@ -2,6 +2,7 @@
 import { onMounted, ref, shallowRef } from 'vue'
 import { getStorage } from '@/storage'
 import type { PendingReason, SpendRecord } from '@/models/types'
+import { NO_MERCHANT } from '@/models/labels'
 import {
   activeCategories,
   categoryName,
@@ -209,7 +210,7 @@ function remove(record: SpendRecord) {
 
     <section v-for="r in pendingRecords" :key="r.id" class="panel">
       <div class="row">
-        <span class="merchant">{{ working(r).merchant || '（無店家）' }}</span>
+        <span class="merchant">{{ working(r).merchant || NO_MERCHANT }}</span>
         <span class="amount">${{ working(r).amount }}</span>
       </div>
       <p class="sub">

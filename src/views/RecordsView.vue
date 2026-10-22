@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { categoryName, refreshRecords, useRecords } from '@/composables/useRecords'
 import type { SpendRecord } from '@/models/types'
+import { NO_MERCHANT } from '@/models/labels'
 
 const { records } = useRecords()
 const keyword = ref('')
@@ -54,7 +55,7 @@ const total = computed(() => filtered.value.reduce((s, r) => s + r.amount, 0))
           <RouterLink :to="`/records/${r.id}`" class="entry">
           <div class="row">
             <span class="merchant">
-              {{ r.merchant || '（無店家）' }}
+              {{ r.merchant || NO_MERCHANT }}
               <span v-if="r.photoId" class="has-photo" title="有發票照片">📷</span>
             </span>
             <span class="amount">${{ r.amount }}</span>

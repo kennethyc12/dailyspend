@@ -29,6 +29,7 @@ import {
   type RejectedInvoice,
 } from '@/parsing/carrierCsv'
 import type { SpendRecord } from '@/models/types'
+import { NO_MERCHANT } from '@/models/labels'
 
 const { settings, state: storageState } = useStorageStatus()
 const storage = getStorage()
@@ -92,12 +93,12 @@ function shortDate(iso: string): string {
 }
 
 function invoiceLabel(inv: CarrierInvoice): string {
-  return `${shortDate(inv.date)} ${inv.merchant || '（無店家）'} $${inv.total}`
+  return `${shortDate(inv.date)} ${inv.merchant || NO_MERCHANT} $${inv.total}`
 }
 
 function recordLabel(r: SpendRecord): string {
   const items = r.items.map((i) => i.name).join('、')
-  return `${shortDate(r.date)} ${r.merchant || '（無店家）'} $${r.amount}${items ? `（${items}）` : ''}`
+  return `${shortDate(r.date)} ${r.merchant || NO_MERCHANT} $${r.amount}${items ? `（${items}）` : ''}`
 }
 
 function clearImport() {

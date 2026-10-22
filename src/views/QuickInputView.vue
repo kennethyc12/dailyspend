@@ -11,6 +11,7 @@ import { detectQrCodes, warmUp } from '@/recognize/qrDetect'
 import { parseEInvoicePayload, type RecognizedInvoice } from '@/recognize/einvoicePayload'
 import { todayIso } from '@/parsing/quickInput'
 import type { SpendRecord } from '@/models/types'
+import { NO_MERCHANT } from '@/models/labels'
 import { handleError } from '@/errors/handleError'
 
 const storage = getStorage()
@@ -353,7 +354,7 @@ async function submitSample() {
 
     <RouterLink v-else-if="lastSaved" to="/pending" class="result" :class="lastWasPending ? 'warn' : 'ok'">
       <template v-if="lastWasMerged">已合併到同一張發票 ·</template>
-      已存：{{ lastSaved.merchant || '（無店家）' }} ·
+      已存：{{ lastSaved.merchant || NO_MERCHANT }} ·
       {{ lastSaved.items.map((i) => i.name).join('、') || '無品項' }} ·
       ${{ lastSaved.amount }} · {{ categoryName(lastSaved.categoryId) }}
       <template v-if="lastWasPending"><br />需要確認，點這裡處理</template>
@@ -365,7 +366,7 @@ async function submitSample() {
       <ul v-else class="list">
         <li v-for="r in todayRecords" :key="r.id">
           <div class="row">
-            <span class="merchant">{{ r.merchant || '（無店家）' }}</span>
+            <span class="merchant">{{ r.merchant || NO_MERCHANT }}</span>
             <span class="amount">${{ r.amount }}</span>
           </div>
           <div class="row sub">

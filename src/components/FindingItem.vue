@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, useId } from 'vue'
 import type { SpendRecord } from '@/models/types'
+import { NO_MERCHANT } from '@/models/labels'
 import { KIND_LABEL, type Finding } from '@/analysis/types'
 
 const props = defineProps<{ finding: Finding; records: SpendRecord[] }>()
@@ -46,7 +47,7 @@ function money(n: number) {
     <ul v-if="open" :id="listId" class="evidence-list">
       <li v-for="r in evidenceRecords" :key="r.id">
         <RouterLink :to="`/records/${r.id}`">
-          {{ r.date }} · {{ r.merchant || '（無店家）' }} · ${{ money(r.amount) }}
+          {{ r.date }} · {{ r.merchant || NO_MERCHANT }} · ${{ money(r.amount) }}
         </RouterLink>
       </li>
     </ul>
