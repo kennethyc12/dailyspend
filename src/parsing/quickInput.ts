@@ -9,7 +9,6 @@ export type BlockingError = 'empty_input' | 'amount_missing' | 'invalid_date'
 
 export interface QuickInputParse {
   merchant: string | null
-  merchantMatched: boolean
   items: ParsedItem[]
   amount: number | null
   date: string
@@ -23,8 +22,6 @@ export interface QuickInputParse {
 export interface ParseOptions {
   /** 預設今天。格式 YYYY-MM-DD。 */
   today?: string
-  /** 歷史紀錄 + 內建常見店家，用來設定 merchantMatched。 */
-  merchantDict?: Iterable<string>
 }
 
 const FULLWIDTH_OFFSET = 0xfee0
@@ -94,11 +91,9 @@ export function parseDatePrefix(token: string, today: string): DatePrefix {
 
 export function parseQuickInput(raw: string, opts: ParseOptions = {}): QuickInputParse {
   const today = opts.today ?? todayIso()
-  const dict = new Set(Array.from(opts.merchantDict ?? [], (s) => normalizeInput(s).toLowerCase()))
 
   const base: QuickInputParse = {
     merchant: null,
-    merchantMatched: false,
     items: [],
     amount: null,
     date: today,
@@ -138,7 +133,6 @@ export function parseQuickInput(raw: string, opts: ParseOptions = {}): QuickInpu
 
   if (amountIndex > cursor) {
     base.merchant = tokens[cursor]!
-    base.merchantMatched = dict.has(base.merchant.toLowerCase())
   } else {
     pendingReasons.push('missing_merchant')
   }

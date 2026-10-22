@@ -133,4 +133,22 @@ describe('seed：修正已存的壞門檻', () => {
     await seed(storage)
     expect(puts()).toBe(0)
   })
+
+  // key 順序刻意用 B7b 之前的（第一次 seed 會寫回，這裡不斷言）
+  it('帶著已刪設定鍵的舊 settings：第一次之後不再寫回', async () => {
+    const s = defaultSettings(NOW)
+    await storage.put('settings', {
+      ...s,
+      defaults: { date: 'today', categoryFallback: null, qty: 1 },
+      parsing: { amountPosition: 'last', merchantDictEnabled: true },
+      thresholds: { ...s.thresholds, repeatPurchase: { windowDays: 14, minRepeat: 3, similarity: 'exact' } },
+      export: { delimiter: ',', encoding: 'utf-8-bom' },
+    })
+    await seed(storage)
+
+    const puts = spyOnSettingsPuts()
+    await seed(storage)
+    await seed(storage)
+    expect(puts()).toBe(0)
+  })
 })

@@ -42,7 +42,7 @@
 | hash router | GitHub Pages 沒有 SPA rewrite，history 模式重新整理子路徑會 404 |
 | Vitest + fake-indexeddb | 邏輯層全部可測，不需要瀏覽器 |
 
-儲存、辨識、分類三層都定義成 port，實作可替換（未來可換 SQLite、加 OCR、加 AI 分類）。
+儲存層定義成 port（`StoragePort`），實作可替換（未來可換 SQLite）。
 
 ## 開始開發
 
@@ -78,7 +78,7 @@ src/
 ├── models/      資料型別定義
 ├── storage/     StoragePort 介面 + IndexedDB 實作 + schema
 ├── parsing/     快速輸入切詞
-├── classify/    ClassifierPort + 規則比對 + 修正學習
+├── classify/    規則比對 + 修正學習
 ├── dedupe/      發票去重鍵與欄位級合併
 ├── analysis/    四條分析規則
 ├── backup/      CSV、zip 備份、Web Share

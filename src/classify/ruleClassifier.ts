@@ -1,5 +1,5 @@
 import type { PendingReason, Rule } from '@/models/types'
-import type { ClassifierPort, ClassifyInput, ClassifyOutput } from './port'
+import type { ClassifyInput, ClassifyOutput } from './port'
 import { majority, resolve } from './matching'
 
 export const CONFIDENCE = {
@@ -7,20 +7,6 @@ export const CONFIDENCE = {
   merchantOnly: 0.8,
   partialItems: 0.7,
 } as const
-
-export class RuleClassifier implements ClassifierPort {
-  readonly source = 'rule' as const
-
-  constructor(
-    private readonly loadRules: () => Promise<Rule[]> | Rule[],
-    private readonly pendingBelow = 0.6,
-  ) {}
-
-  async classify(input: ClassifyInput): Promise<ClassifyOutput> {
-    const rules = await this.loadRules()
-    return classifyWithRules(input, rules, this.pendingBelow)
-  }
-}
 
 export function classifyWithRules(
   input: ClassifyInput,

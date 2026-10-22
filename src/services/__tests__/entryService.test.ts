@@ -11,7 +11,6 @@ import {
   deleteRecord,
   getRecord,
   learnItemRule,
-  merchantDictionary,
   resolvePending,
   updateRecordFields,
   ValidationError,
@@ -96,11 +95,6 @@ describe('文字輸入的完整流程（§9）', () => {
     const r = await only()
     const today = new Date().toISOString().slice(0, 10)
     expect(r.date).not.toBe(today)
-  })
-
-  it('店家字典會納入歷史紀錄', async () => {
-    await createFromText(storage, '鼎泰豐 小籠包 250', NOW)
-    expect(await merchantDictionary(storage)).toContain('鼎泰豐')
   })
 })
 

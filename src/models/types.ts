@@ -93,17 +93,16 @@ export interface Photo {
 
 export interface Settings {
   key: 'settings'
-  defaults: { date: 'today'; categoryFallback: string | null; qty: number }
-  parsing: { amountPosition: 'last'; merchantDictEnabled: boolean }
+  defaults: { qty: number }
   thresholds: {
     smallFrequent: { windowDays: number; smallAmount: number; minCount: number }
     subscription: { minMonths: number; amountVariancePct: number; maxMonthlyOccurrences: number }
     monthGrowth: { growthPct: number; minDelta: number; minDaysThisMonth: number }
-    repeatPurchase: { windowDays: number; minRepeat: number; similarity: 'exact' }
+    repeatPurchase: { windowDays: number; minRepeat: number }
     suggestion: { topN: number }
   }
   confidence: { pendingBelow: number }
-  export: { delimiter: string; encoding: string }
+  export: { delimiter: string }
   backup: { remindAfterDays: number; lastBackupAt: number | null }
   platform: { persistGranted: boolean | null }
   /** 壓縮參數會影響 QR 還解不解得出來，所以做成可調而不是寫死。 */

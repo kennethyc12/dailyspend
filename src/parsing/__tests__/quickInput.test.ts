@@ -9,10 +9,9 @@ import {
 } from '../quickInput'
 
 const TODAY = '2026-10-08'
-const DICT = ['全家', '全聯', '7-11', '星巴克', '麥當勞', 'Netflix']
 
 function parse(input: string) {
-  return parseQuickInput(input, { today: TODAY, merchantDict: DICT })
+  return parseQuickInput(input, { today: TODAY })
 }
 
 function shape(r: QuickInputParse) {
@@ -35,7 +34,6 @@ describe('§4.2 回測表', () => {
     const r = parse('蝦皮 320')
     expect(shape(r)).toEqual({ merchant: '蝦皮', items: [], amount: 320 })
     expect(r.pendingReasons).toEqual([])
-    expect(r.merchantMatched).toBe(false)
   })
 
   it('昨天 全聯 蛋 雞胸 268', () => {
@@ -188,17 +186,6 @@ describe('日期前綴', () => {
 
   it('todayIso 產生 YYYY-MM-DD', () => {
     expect(todayIso(new Date(2026, 9, 8))).toBe('2026-10-08')
-  })
-})
-
-describe('店家字典', () => {
-  it('命中字典時標記 merchantMatched', () => {
-    expect(parse('全家 咖啡 55').merchantMatched).toBe(true)
-    expect(parse('蝦皮 320').merchantMatched).toBe(false)
-  })
-
-  it('比對不分大小寫', () => {
-    expect(parse('netflix 390').merchantMatched).toBe(true)
   })
 })
 

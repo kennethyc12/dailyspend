@@ -15,18 +15,6 @@ import { prepareRecord, saveRecord, type SaveOutcome } from './recordService'
 import type { Settings } from '@/models/types'
 import { ISO_DATE, isValidYmd, parseIso } from '@/analysis/dates'
 
-/** 歷史店家 + 內建 merchant 規則，用來標記 merchantMatched。 */
-export async function merchantDictionary(storage: StoragePort): Promise<string[]> {
-  const [records, rules] = await Promise.all([
-    storage.getAll<SpendRecord>('records'),
-    storage.getAll<Rule>('rules'),
-  ])
-  const names = new Set<string>()
-  for (const r of records) if (r.merchant) names.add(r.merchant)
-  for (const r of rules) if (r.type === 'merchant') names.add(r.pattern)
-  return [...names]
-}
-
 export class ValidationError extends Error {
   constructor(
     message: string,
@@ -76,12 +64,9 @@ export async function createFromText(
   now = Date.now(),
   photo?: Photo,
 ): Promise<EntryResult> {
-  const [dict, settings] = await Promise.all([
-    merchantDictionary(storage),
-    storage.get<Settings>('settings', 'settings'),
-  ])
+  const settings = await storage.get<Settings>('settings', 'settings')
 
-  const parse = parseQuickInput(text, { merchantDict: dict })
+  const parse = parseQuickInput(text)
   if (parse.blockingError) return { ok: false, blocked: parse.blockingError, parse }
 
   const classified = await classify(storage, { merchant: parse.merchant, items: parse.items })

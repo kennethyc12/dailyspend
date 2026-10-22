@@ -162,7 +162,7 @@
 
 ## 架構
 
-三個 port 定義穩定契約，實作可替換：
+~~三個 port 定義穩定契約~~ 儲存層的 port 定義穩定契約，實作可替換（B7b，2026-10-18：辨識的 port 未採用、分類的 port 已刪）：
 
 ```
 StoragePort    → IndexedDbAdapter      （未來可換 SQLite）
@@ -170,9 +170,11 @@ RecognizerPort → QrRecognizer（zxing-wasm，欄位切法待 payload）（未�
 ClassifierPort → RuleClassifier        （未來可加 AI）
 ```
 
+> 2026-10-18 更正（B7b，使用者同意）：只剩 `StoragePort`。`RecognizerPort` 已評估、未採用；`ClassifierPort`、`RuleClassifier` 依 D4 刪除。
+
 `StoragePort` 的簽章**不得出現任何 IndexedDB 專屬型別**，範圍查詢用自定義的 `KeyRange`，由 adapter 轉成 `IDBKeyRange`。這是「儲存可替換」承諾的實際驗收點，不是口號。
 
-AI 分類的介面已預留，v1 不註冊。
+~~AI 分類的介面已預留，v1 不註冊。~~ 介面已刪（D4，B7b）。
 
 ---
 

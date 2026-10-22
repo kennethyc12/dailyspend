@@ -1,6 +1,4 @@
-import { isValidYmd } from '@/analysis/dates'
-
-const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})$/
+import { isValidIsoDate, parseIso } from '@/analysis/dates'
 
 /** 台灣發票字軌按期（兩個月）配發：1–2月期=01、3–4月期=03…11–12月期=11。 */
 export function periodStartMonth(month: number): number {
@@ -14,13 +12,9 @@ export function rocYear(gregorianYear: number): number {
 /** `YYYY-MM-DD` → 民國年 + 期別起始月，例如 2026-10-05 → '11509'。 */
 export function buildInvoicePeriod(date: string | null): string | null {
   if (!date) return null
-  const m = ISO_DATE.exec(date)
-  if (!m) return null
+  if (!isValidIsoDate(date)) return null
 
-  const year = Number(m[1])
-  const month = Number(m[2])
-  const day = Number(m[3])
-  if (!isValidYmd(year, month, day)) return null
+  const { y: year, m: month } = parseIso(date)
 
   const roc = rocYear(year)
   if (roc < 1) return null

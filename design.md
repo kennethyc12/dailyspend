@@ -51,6 +51,9 @@
 └────────┘ └──────────┘ └─────────────┘
 ```
 
+> 2026-10-18 更正（B7b，使用者同意）：實際只剩 `StoragePort`。`RecognizerPort` 已評估、未採用（QR 偵測直接呼叫 `src/recognize/qrDetect.ts`）；
+> `ClassifierPort` 與 `RuleClassifier` 依 D4 刪除，分類走 `classifyWithRules`。
+
 **Port（介面）= 穩定契約，Adapter（實作）= 可替換。**
 
 ### 2.1 StoragePort
@@ -162,9 +165,12 @@ interface ClassifierPort {
 }
 ```
 
+> 2026-10-18 更正（B7b，使用者同意）：`RecognizerPort`、`RecognitionResult` 已評估、未採用，程式裡從未實作；
+> `ClassifierPort` 依 D4 刪除。上面只有 `ClassifyOutput` 仍有效（`src/classify/port.ts`）。
+
 兩種 confidence 刻意用不同名稱（`recognizeConfidence` / `classifyConfidence`），避免在 record 上混淆。
 
-多個 recognizer 可串接（QR 先跑，未來 OCR 補缺欄位），service 層以 chain 呼叫，合併時「先到且 `recognizeConfidence` 較高者勝」。
+~~多個 recognizer 可串接（QR 先跑，未來 OCR 補缺欄位），service 層以 chain 呼叫，合併時「先到且 `recognizeConfidence` 較高者勝」。~~（B7b，2026-10-18：`RecognizerPort` 未採用）
 
 ---
 
@@ -307,6 +313,10 @@ priority 基準值：
 }
 ```
 
+> 2026-10-18 更正（B7b，使用者同意）：沒有讀取者的鍵已刪：`defaults.date`、`defaults.categoryFallback`、
+> `parsing` 整組（`amountPosition`、`merchantDictEnabled`）、`export.encoding`（BOM 寫死在 `csv.ts`）、
+> `thresholds.repeatPurchase.similarity`。不做 migration，舊裝置與備份檔裡的舊鍵會殘留，沒有讀取者。
+
 所有預設值集中於此，UI 的「設定」頁直接編輯。
 
 ### 3.7 `PendingReason`
@@ -338,7 +348,7 @@ type PendingReason =
 ### 4.1 規則（由後往前，確定性剖析，不猜）
 
 1. **金額**：取字串中**最後一個**純數字 token（允許 `55`、`1,200`、`55元`、`$55`）。找不到 → 擋下，提示補金額（金額是唯一必填）。
-2. **店家**：第一個 token。若命中店家字典（歷史紀錄 + 內建常見店家）則標記 `merchantMatched = true`。
+2. **店家**：第一個 token。~~若命中店家字典（歷史紀錄 + 內建常見店家）則標記 `merchantMatched = true`。~~（B7b，2026-10-18：沒有讀取者，已刪）
 3. **品項**：中間所有 token，以空白切，每個 token 一個 item；沒有中間 token → `items: []`。
 4. **日期前綴**（選配）：首 token 符合 `今天 | 昨天 | M/D | MM-DD` 則吃掉作為日期，店家往後移一位。
 
@@ -494,7 +504,7 @@ iPhone 拍的照片方向放在 EXIF 裡，不套用存進去的圖會是躺著�
 （`globPatterns` 含 `wasm`）——離線時沒有它就解不了碼，而離線可用是這個 App
 的前提。代價是安裝時多下載約 1.2 MB。
 
-這一頁是量測工具，不是 `RecognizerPort` 的實作；偵測本身在
+這一頁是量測工具~~，不是 `RecognizerPort` 的實作~~（B7b：`RecognizerPort` 未採用）；偵測本身在
 `src/recognize/qrDetect.ts`。
 
 ### 5.3 流程（已實作）
@@ -672,7 +682,9 @@ v0.1 寫「有品項 → 以最長的 item.name 建規則」有明確的教錯�
 
 ### 6.4 AI 介面預留
 
-`AiClassifier implements ClassifierPort`，v1 不註冊到 DI container。接上時 service 層策略：rule 先跑，`classifyConfidence < threshold` 才呼叫 AI；AI 結果寫入 `categorySource: 'ai'`。
+~~`AiClassifier implements ClassifierPort`，v1 不註冊到 DI container。接上時 service 層策略：rule 先跑，`classifyConfidence < threshold` 才呼叫 AI；AI 結果寫入 `categorySource: 'ai'`。~~
+
+（B7b，2026-10-18：`ClassifierPort` 已刪，D4，使用者同意。日後接 AI 時再設計介面。）
 
 ---
 
@@ -780,7 +792,7 @@ else → merge(existing, incoming)
 | **高頻小額** | 近 N 天內，單筆 ≤ A 元 且 同類別次數 ≥ C | `windowDays` `smallAmount` `minCount` | 30 / 150 / 8 | 1–365 / ≥ 1 / ≥ 2 |
 | **訂閱與固定支出** | 見 8.2 | `minMonths` `amountVariancePct` `maxMonthlyOccurrences` | 3 / 10% / 2 | ≥ 2 / ≥ 0 / ≥ 1 |
 | **月對月暴增** | 見 8.1 | `growthPct` `minDelta` `minDaysThisMonth` | 50% / 1000 / 7 | ≥ 0 / ≥ 1 / 1–28 |
-| **同類重複購買** | 近 N 天內，相同品項名出現在 ≥ K 筆紀錄（見 §8.5） | `windowDays` `minRepeat` `similarity` | 14 / 3 / `exact` | 1–365 / ≥ 2 / — |
+| **同類重複購買** | 近 N 天內，相同品項名出現在 ≥ K 筆紀錄（見 §8.5） | `windowDays` `minRepeat` ~~`similarity`~~ | 14 / 3 ~~/ `exact`~~ | 1–365 / ≥ 2 ~~/ —~~ |
 | **可降低建議** | 見 8.3 | `topN` | **3** | ≥ 1 |
 
 範圍（B6a，2026-10-17，使用者同意）定義在 `THRESHOLD_RANGES`（`src/storage/defaults.ts`），同時用在兩處：分析頁寫入時擋下範圍外、小數與空白，顯示「門檻儲存失敗：<欄位>要填 <範圍>」；每次開啟時 `migrateSettings` 把已存的範圍外值夾回邊界、小數四捨五入、非數字退回預設。下限是讓規則語意成立的最小值（例如 `minMonths` 0 會讓訂閱偵測當掉、`minDelta` ≥ 1 保證本期有紀錄可當依據），上限只在會當掉或語意不成立時才設（觀察天數過大會超出日期範圍；`minDaysThisMonth` 大於 28 在二月永遠達不到）。

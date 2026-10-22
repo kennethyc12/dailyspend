@@ -29,17 +29,16 @@ export function defaultCategories(now = Date.now()): Category[] {
 export function defaultSettings(now = Date.now()): Settings {
   return {
     key: 'settings',
-    defaults: { date: 'today', categoryFallback: null, qty: 1 },
-    parsing: { amountPosition: 'last', merchantDictEnabled: true },
+    defaults: { qty: 1 },
     thresholds: {
       smallFrequent: { windowDays: 30, smallAmount: 150, minCount: 8 },
       subscription: { minMonths: 3, amountVariancePct: 10, maxMonthlyOccurrences: 2 },
       monthGrowth: { growthPct: 50, minDelta: 1000, minDaysThisMonth: 7 },
-      repeatPurchase: { windowDays: 14, minRepeat: 3, similarity: 'exact' },
+      repeatPurchase: { windowDays: 14, minRepeat: 3 },
       suggestion: { topN: 3 },
     },
     confidence: { pendingBelow: 0.6 },
-    export: { delimiter: ',', encoding: 'utf-8-bom' },
+    export: { delimiter: ',' },
     backup: { remindAfterDays: 7, lastBackupAt: null },
     platform: { persistGranted: null },
     photo: { maxEdge: 1600, thumbEdge: 320, quality: 0.8 },

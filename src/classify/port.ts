@@ -15,8 +15,3 @@ export interface ClassifyOutput {
   /** §6.1 步驟 3–4 產生；§2.3 原本沒列，但上層需要它決定 status。 */
   pendingReasons: PendingReason[]
 }
-
-export interface ClassifierPort {
-  readonly source: Exclude<CategorySource, 'user'>
-  classify(input: ClassifyInput): Promise<ClassifyOutput>
-}

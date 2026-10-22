@@ -1,8 +1,8 @@
 import { ref } from 'vue'
 import { getStorage, seed } from '@/storage'
-import { loadActiveRules, seedBuiltinRules } from '@/services/ruleService'
+import { seedBuiltinRules } from '@/services/ruleService'
 import { shouldRemindBackup } from '@/services/backupService'
-import type { Category, Settings } from '@/models/types'
+import type { Settings } from '@/models/types'
 import { reportError } from '@/errors/errorLog'
 import { updateSettings } from '@/services/settingsService'
 
@@ -10,8 +10,6 @@ export type InitState = 'idle' | 'running' | 'ready' | 'failed'
 
 const state = ref<InitState>('idle')
 const error = ref<string | null>(null)
-const categoryCount = ref<number | null>(null)
-const ruleCount = ref<number | null>(null)
 const recordCount = ref<number | null>(null)
 const needsBackup = ref(false)
 const settings = ref<Settings | null>(null)
@@ -67,8 +65,6 @@ async function runInit() {
     }
 
     settings.value = current
-    categoryCount.value = (await storage.getAll<Category>('categories')).length
-    ruleCount.value = (await loadActiveRules(storage)).length
     recordCount.value = await storage.count('records')
     needsBackup.value = shouldRemindBackup(current, recordCount.value)
     usage.value = await storage.estimateUsage()
@@ -127,8 +123,6 @@ export function useStorageStatus() {
   return {
     state,
     error,
-    categoryCount,
-    ruleCount,
     recordCount,
     needsBackup,
     settings,

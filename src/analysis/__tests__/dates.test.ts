@@ -28,6 +28,7 @@ describe('isValidIsoDate', () => {
     expect(isValidIsoDate('2026-02-28')).toBe(true)
     expect(isValidIsoDate('2026-02-30')).toBe(false)
     expect(isValidIsoDate('2026/02/28')).toBe(false)
+    expect(isValidIsoDate('2026-1-5')).toBe(false)
     expect(isValidIsoDate('')).toBe(false)
   })
 })

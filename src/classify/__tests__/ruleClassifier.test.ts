@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Rule, RuleOrigin, RuleType } from '@/models/types'
-import { classifyWithRules, CONFIDENCE, RuleClassifier } from '../ruleClassifier'
+import { classifyWithRules, CONFIDENCE } from '../ruleClassifier'
 import { basePriority, compareRules, majority, resolve, ruleMatches } from '../matching'
 import { builtinRules } from '../builtinRules'
 
@@ -221,16 +221,5 @@ describe('內建規則', () => {
 
   it('id 穩定，重新產生不會變動', () => {
     expect(builtinRules(1).map((r) => r.id)).toEqual(builtinRules(2).map((r) => r.id))
-  })
-})
-
-describe('RuleClassifier', () => {
-  it('實作 ClassifierPort，source 為 rule', async () => {
-    const c = new RuleClassifier(() => BASE)
-    expect(c.source).toBe('rule')
-    const out = await c.classify({ merchant: 'Netflix', items: [] })
-    expect(out.source).toBe('rule')
-    expect(out.categoryId).toBe('subscription')
-    expect(out.matchedRuleIds).toHaveLength(1)
   })
 })
