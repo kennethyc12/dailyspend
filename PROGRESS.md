@@ -461,7 +461,7 @@ v1 的程式寫完了。接下來最有價值的不是寫功能，是**讓真實
 | **B8** ✅ | 文件同步：待確認原因 11 種、design.md §3.7／§4.4 補 `tokens_after_amount`；單價不加總的理由改成「沒有總計額時無法核對品項是否齊全」（FEATURES、註解、記一筆提示、測試名稱）；編碼與合規樣本現況；FEATURES〈數字〉表標統計日期、README 拿掉測試數；開發指令補 lint；清單外同類舊說法一併改（README:27、PROGRESS 現況段、QR 實驗室頁說明） | 〈數字〉表每批都會過時，已標統計日期與 commit；若之後每批都要更新，再考慮刪表 |
 | **same-name-items** ✅ | `computeRecordUpdate` 原本用品名建 Map 對回舊品項，同名品項全拿到最後一個的值；改用 `matchItems`（頭尾相同的依位置，中段同名的依舊順序，相鄰同名刪一個保留前面那個）；design.md:979 與 `RecordPatch.itemNames` 註解對齊實況 | **修正前編輯過同名品項的紀錄不會自動修復**；QR 品名頭尾空白、「同名保留 categoryId」與重分類不一致另記 ticket |
 
-另外二十五張 ticket：
+另外二十四張 ticket：
 - 返回分析頁時展開與捲動消失：從佐證清單點進一筆再「← 返回」，清單收合、可能回到頁首（沒有 `keep-alive`、`scrollBehavior`）。使用者 2026-10-17 決定接受。觸發點：真機回報看完一筆回來找不到原本那條
 - `RecordEditView.test.ts`「略過逐項指定」在全套 `--sequence.shuffle` 下偶發失敗（chris 審 B6a 時 20 次紅 2 次；base `22e2cbf` 跑 6 次未重現，推測是既有時序問題，與 B6a 無關）。B6b 審閱時補充：單檔 30 seeds 紅 5 次，「逐項指定分類」也會紅，失敗的都排在檔內第 1～2 位，base `edb94f3` 同樣重現；推測是第一個測試冷啟動超過 `waitFor` 的 1000ms。觸發點：CI 或一般執行也紅
 - 設定頁照片壓縮的無效輸入靜默忽略：`updatePhotoSetting` 在 `value <= 0` 時直接 return、沒有提示，`quality` 大於 1 也接受（B6a 只做分析頁）。觸發點：真機改壞照片參數，或 9b-3 驗收時
@@ -474,7 +474,6 @@ v1 的程式寫完了。接下來最有價值的不是寫功能，是**讓真實
 - 改日期後 `invoiceKey` 撞到另一筆時不合併（`saveRecord` 有 catch 後合併，編輯與待確認卡沒有）。訊息已講人話（B4.2b-2 `userMessage`），合併仍未做。觸發點：使用者回報改日期存不了而需要合併
 - 待確認卡依原因聚焦欄位（design.md §3.7「不同 reason 對應不同的修正欄位聚焦」）。觸發點：B4.2b 之後覺得找欄位麻煩
 - `rawRecognition` 只存解析後的結果，parser 有 bug 時事後救不回來。要不要另存原始 payload
-- `entryService.test.ts:85` 在台北時間 00:00–08:00 必定失敗（見「坑」第 9 點）
 - 依規格把左右 QR 串接後再解析（含 Base64 模式，編碼參數 2）：規格上左右 QR 是一段連續的內容，現在左右分開切三元組，斷點不在品項邊界時會漏品項。P3，目前 0 筆實例。觸發點：第一次遇到參數 2，或合規發票出現「湊不成」note。官方範例 payload 的測試併在這裡做。境外電商（參數 3）在參數之後多兩個 10 碼金額欄位，會讓品項三元組錯位，一併在這裡評估
 - QR 品名頭尾空白：`einvoicePayload.ts:171-180` 切品名時沒有 trim，帶頭尾空白的品名在編輯品項後對不上（新品名會 trim），變成新品項，數量與金額遺失。另外「品項欄沒改就不送 `itemNames`」（`formToPatch`）這條不變式在 same-name-items 之後沒有測試保護：既有的「#1 只改備註，同名的兩個品項保持原樣」送不送 `itemNames` 結果都一樣。觸發點：第一次出現帶頭尾空白的 QR 品名
 - 「同名品項保留 categoryId」與重分類不一致：店家或品名一改、分類來源不是 `user` 時，`applyClassification` 依索引覆寫所有品項的 `categoryId`；保留只在 user 來源或待確認卡草稿（`reclassify: false`）時成立。觸發點：使用者回報改了品項後逐項分類被重設
@@ -561,9 +560,9 @@ push 到 `main` 會自動跑 CI（lint → test → build → deploy）。
 8. **iPhone 上沒有 console**。要除錯只能靠設定頁的「未處理的錯誤」清單，
    或接上 Mac Safari 的網頁檢閱器（design.md §13.5）。
 
-9. **`entryService.test.ts:85` 有時區 bug**：用 UTC 的今天比對本地時間算的「昨天」，
+9. ~~**`entryService.test.ts:85` 有時區 bug**：用 UTC 的今天比對本地時間算的「昨天」，
    台北時間 00:00–08:00 跑必定失敗（CI 在 UTC 不受影響）。這個時段在本機跑測試用
-   `TZ=UTC npm test`。
+   `TZ=UTC npm test`。~~（entryservice-tz-test，2026-10-23 已修：改用 `addDays(todayIso(), -1)`）
 
 10. **好市多 App 的「發票開立通知」不是合規發票**：左方 QR 沒有 77 碼表頭，只有品項，
     所以讀不到號碼、日期、總計額，記一筆會請你自己填金額。這是設計上的行為。

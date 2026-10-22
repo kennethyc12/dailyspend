@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { IDBFactory } from 'fake-indexeddb'
 import type { RecordItem, Rule, SpendRecord } from '@/models/types'
+import { todayIso } from '@/parsing/quickInput'
+import { addDays } from '@/analysis/dates'
 import { IndexedDbAdapter, seed, StorageConflictError } from '@/storage'
 import { loadActiveRules, seedBuiltinRules } from '@/services/ruleService'
 import {
@@ -93,8 +95,8 @@ describe('文字輸入的完整流程（§9）', () => {
   it('「昨天」前綴會改日期', async () => {
     await createFromText(storage, '昨天 全家 咖啡 55', NOW)
     const r = await only()
-    const today = new Date().toISOString().slice(0, 10)
-    expect(r.date).not.toBe(today)
+    // 今天用本地日期（同 parseQuickInput）；UTC 日期在台北 00:00–08:00 會等於本地的昨天
+    expect(r.date).toBe(addDays(todayIso(), -1))
   })
 })
 
