@@ -457,7 +457,7 @@ v1 的程式寫完了。接下來最有價值的不是寫功能，是**讓真實
 | **B7c** ✅ | 「（無店家）」7 處改用 `src/models/labels.ts` 的 `NO_MERCHANT`；`categoryId === null` 在畫面與 CSV 改叫「未分類」（`UNCATEGORIZED`），「待確認」只指 `status: pending`；`analyze.ts` 的 `nameOf` 只收 `string`、刪掉走不到的 null 分支；新增 `RecordsView.test.ts`；改 `PendingView.test.ts:242`、`backup.test.ts:109-111` 與 design.md:190（使用者同意） | **使用者可見**：CSV 類別欄的值從「待確認」改為「未分類」，舊匯出檔不會改寫；紀錄頁搜「待確認」不再找到沒有類別的紀錄（搜尋本來就不比對狀態）。null 類別仍是 `warn` 樣式。「null → 標籤」兩份實作記 ticket |
 | **B8** ✅ | 文件同步：待確認原因 11 種、design.md §3.7／§4.4 補 `tokens_after_amount`；單價不加總的理由改成「沒有總計額時無法核對品項是否齊全」（FEATURES、註解、記一筆提示、測試名稱）；編碼與合規樣本現況；FEATURES〈數字〉表標統計日期、README 拿掉測試數；開發指令補 lint；清單外同類舊說法一併改（README:27、PROGRESS 現況段、QR 實驗室頁說明） | 〈數字〉表每批都會過時，已標統計日期與 commit；若之後每批都要更新，再考慮刪表 |
 
-另外二十四張 ticket：
+另外二十五張 ticket：
 - 返回分析頁時展開與捲動消失：從佐證清單點進一筆再「← 返回」，清單收合、可能回到頁首（沒有 `keep-alive`、`scrollBehavior`）。使用者 2026-10-17 決定接受。觸發點：真機回報看完一筆回來找不到原本那條
 - `RecordEditView.test.ts`「略過逐項指定」在全套 `--sequence.shuffle` 下偶發失敗（chris 審 B6a 時 20 次紅 2 次；base `22e2cbf` 跑 6 次未重現，推測是既有時序問題，與 B6a 無關）。B6b 審閱時補充：單檔 30 seeds 紅 5 次，「逐項指定分類」也會紅，失敗的都排在檔內第 1～2 位，base `edb94f3` 同樣重現；推測是第一個測試冷啟動超過 `waitFor` 的 1000ms。觸發點：CI 或一般執行也紅
 - 設定頁照片壓縮的無效輸入靜默忽略：`updatePhotoSetting` 在 `value <= 0` 時直接 return、沒有提示，`quality` 大於 1 也接受（B6a 只做分析頁）。觸發點：真機改壞照片參數，或 9b-3 驗收時
@@ -472,7 +472,8 @@ v1 的程式寫完了。接下來最有價值的不是寫功能，是**讓真實
 - `rawRecognition` 只存解析後的結果，parser 有 bug 時事後救不回來。要不要另存原始 payload
 - `entryService.test.ts:85` 在台北時間 00:00–08:00 必定失敗（見「坑」第 9 點）
 - 依規格把左右 QR 串接後再解析（含 Base64 模式，編碼參數 2）：規格上左右 QR 是一段連續的內容，現在左右分開切三元組，斷點不在品項邊界時會漏品項。P3，目前 0 筆實例。觸發點：第一次遇到參數 2，或合規發票出現「湊不成」note。官方範例 payload 的測試併在這裡做。境外電商（參數 3）在參數之後多兩個 10 碼金額欄位，會讓品項三元組錯位，一併在這裡評估
-- 同名品項被合併：`updateRecordFields` 用品名當 key 對應既有品項，兩個同名品項只留最後一個的數量、金額與分類。P2，觸發點：發票出現同名品項（例如同品名不同規格）。**觸發點已到**：載具樣本 90 張中有 6 張含同名品項；使用者 2026-10-13 決定維持原排序
+- QR 品名頭尾空白：`einvoicePayload.ts:171-180` 切品名時沒有 trim，帶頭尾空白的品名在編輯品項後對不上（新品名會 trim），變成新品項，數量與金額遺失。另外「品項欄沒改就不送 `itemNames`」（`formToPatch`）這條不變式在 same-name-items 之後沒有測試保護：既有的「#1 只改備註，同名的兩個品項保持原樣」送不送 `itemNames` 結果都一樣。觸發點：第一次出現帶頭尾空白的 QR 品名
+- 「同名品項保留 categoryId」與重分類不一致：店家或品名一改、分類來源不是 `user` 時，`applyClassification` 依索引覆寫所有品項的 `categoryId`；保留只在 user 來源或待確認卡草稿（`reclassify: false`）時成立。觸發點：使用者回報改了品項後逐項分類被重設
 - 已有照片和發票時再選一張，取消或壓縮失敗會把發票資料清掉（`onPickPhoto` 一開始就 `clearInvoice()`）。P3，照片仍附著、文字路徑可用，不會存錯資料。觸發點：有人回報重選照片失敗後發票面板不見
 - QR 路徑不讀 `needsReclassify`：`createFromInvoice` 合併後品項變了也不會重跑分類（載具匯入已用 `applyClassification` 處理）。觸發點：QR 合併進既有紀錄後分類明顯錯誤
 - `prepareFiles()` 重組失敗時保留舊檔：只設 `errorMsg`，`csvFile`／`backupFile` 仍是舊的，匯出會拿到匯入或還原前的資料。修法：重組失敗時清掉舊檔或停用匯出。觸發點：使用者回報匯出的資料比畫面上舊

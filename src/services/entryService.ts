@@ -308,7 +308,10 @@ export interface RecordPatch {
   date?: string
   merchant?: string
   amount?: number
-  /** 品項名稱清單。同名的品項會保留既有的 categoryId，新的才重跑分類。 */
+  /**
+   * 品項名稱清單。和舊品項依位置與順序對應（同名的各自保留），沿用舊品項的數量、金額與分類；
+   * 對不上的是新品項。店家或品名有變時會重分類，規則來源的逐項分類會被重算。
+   */
   itemNames?: string[]
   note?: string
 }
@@ -317,6 +320,37 @@ export interface RecordUpdate {
   record: SpendRecord
   /** 重分類命中的規則；呼叫端決定要不要、何時累計命中次數。 */
   matchedRuleIds: string[]
+}
+
+/**
+ * 不能用品名當 Map key：同名品項會全拿到最後一個的數量與金額。
+ * 相鄰同名刪掉一個時，從文字分不出刪的是哪個，保留前面那個。
+ */
+function matchItems(previous: RecordItem[], names: string[]): RecordItem[] {
+  const limit = Math.min(names.length, previous.length)
+  let head = 0
+  while (head < limit && names[head] === previous[head]!.name) head++
+  let tail = 0
+  while (
+    tail < limit - head &&
+    names[names.length - 1 - tail] === previous[previous.length - 1 - tail]!.name
+  )
+    tail++
+
+  const pool = new Map<string, RecordItem[]>()
+  for (const item of previous.slice(head, previous.length - tail)) {
+    const queue = pool.get(item.name)
+    if (queue) queue.push(item)
+    else pool.set(item.name, [item])
+  }
+
+  return names.map((name, i) => {
+    if (i < head) return previous[i]!
+    if (i >= names.length - tail) return previous[previous.length - (names.length - i)]!
+    return (
+      pool.get(name)?.shift() ?? { name, qty: 1, unitPrice: null, amount: null, categoryId: null }
+    )
+  })
 }
 
 /** updateRecordFields 的「算」：驗證、重組品項、必要時重分類、prepareRecord。不寫入。 */
@@ -338,23 +372,13 @@ export async function computeRecordUpdate(
 
   const merchant = (patch.merchant ?? record.merchant).trim()
 
-  const previous = new Map(record.items.map((i) => [i.name, i]))
   const items: RecordItem[] =
     patch.itemNames === undefined
       ? record.items
-      : patch.itemNames
-          .map((n) => n.trim())
-          .filter(Boolean)
-          .map(
-            (name) =>
-              previous.get(name) ?? {
-                name,
-                qty: 1,
-                unitPrice: null,
-                amount: null,
-                categoryId: null,
-              },
-          )
+      : matchItems(
+          record.items,
+          patch.itemNames.map((n) => n.trim()).filter(Boolean),
+        )
 
   const structureChanged =
     merchant !== record.merchant ||

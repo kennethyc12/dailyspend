@@ -8,7 +8,10 @@ import { prepareRecord } from '@/services/recordService'
 import { createFromInvoice } from '@/services/invoiceService'
 import { parseEInvoicePayload } from '@/recognize/einvoicePayload'
 import { compressPhoto } from '@/photo/compress'
-import { leftQr, photoFromFile } from '@/test/fixtures'
+import { leftQr, photoFromFile, REAL_PASSBOOK_CSV } from '@/test/fixtures'
+import { parseCarrierCsv } from '@/parsing/carrierCsv'
+import { commitCarrierImport, prepareCarrierImport } from '@/services/carrierImportService'
+import { itemsToText } from '@/views/recordForm'
 import {
   button,
   field,
@@ -26,6 +29,8 @@ vi.mock('@/photo/compress', () => ({
 }))
 
 const { storage } = useViewTest()
+
+const NOW = 1_760_000_000_000
 
 beforeEach(() => {
   vi.mocked(compressPhoto).mockReset()
@@ -86,6 +91,22 @@ describe('編輯紀錄', () => {
     expect(after!.note).toBe('公司聚餐')
   })
 
+  it('載具匯入的同名品項：加一行品項後，兩個綠茶的小計各自保留', async () => {
+    const parsed = parseCarrierCsv(REAL_PASSBOOK_CSV)
+    if (!parsed.ok) throw new Error(parsed.reason)
+    await commitCarrierImport(storage(), await prepareCarrierImport(storage(), parsed, NOW), new Map(), NOW)
+    const tea = (await storage().getAll<SpendRecord>('records')).find((r) => r.invoiceNumber === 'ZZ00000003')!
+    expect(tea.items.map((i) => i.amount)).toEqual([29, 28])
+
+    const wrapper = await openEditor(tea.id)
+    await field(wrapper, '品項').setValue(`${itemsToText(tea)}\n某品`)
+    await button(wrapper, '儲存').trigger('click')
+    await settled(wrapper)
+
+    const after = await storage().get<SpendRecord>('records', tea.id)
+    expect(after!.items.map((i) => i.amount)).toEqual([29, 28, null])
+  })
+
   it('沒有類別的紀錄：分類區寫「目前：未分類」', async () => {
     const r = await textRecord('某店 100')
     const wrapper = await openEditor(r.id)
@@ -106,7 +127,7 @@ describe('編輯紀錄：不能默默改壞資料', () => {
     expect(after!.items).toEqual(before.items)
   })
 
-  // 品項一送出，service 會用品名對應既有品項，同名的兩個會被合併；沒改品項就不該送
+  // 品項沒改就不送：送了會重新對應一次，品名帶頭尾空白時會變成新品項
   it('#1 只改備註，同名的兩個品項保持原樣', async () => {
     const result = await createFromInvoice(storage(), {
       recognized: parseEInvoicePayload([

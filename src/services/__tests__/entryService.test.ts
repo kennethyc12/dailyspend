@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { IDBFactory } from 'fake-indexeddb'
-import type { Rule, SpendRecord } from '@/models/types'
+import type { RecordItem, Rule, SpendRecord } from '@/models/types'
 import { IndexedDbAdapter, seed, StorageConflictError } from '@/storage'
 import { loadActiveRules, seedBuiltinRules } from '@/services/ruleService'
 import {
@@ -481,6 +481,87 @@ describe('編輯既有紀錄', () => {
     const r = await only()
     expect((await getRecord(storage, r.id))?.id).toBe(r.id)
     expect(await getRecord(storage, 'nope')).toBeUndefined()
+  })
+})
+
+describe('編輯品項：同名品項各自保留', () => {
+  const item = (name: string, qty: number, amount: number | null, categoryId: string | null = null): RecordItem => ({
+    name,
+    qty,
+    unitPrice: null,
+    amount,
+    categoryId,
+  })
+
+  async function withItems(items: RecordItem[], over: Partial<SpendRecord> = {}): Promise<SpendRecord> {
+    await createFromText(storage, '某店 某品 100', NOW)
+    return { ...(await only()), items, ...over }
+  }
+
+  const shape = (r: SpendRecord) => r.items.map((i) => [i.name, i.qty, i.amount])
+  const edit = async (record: SpendRecord, itemNames: string[]) =>
+    (await computeRecordUpdate(storage, record, { itemNames }, { now: NOW + 1 })).record
+
+  it('加一個品項：兩個同名品項各自保留數量與金額', async () => {
+    const r = await withItems([item('綠茶', 1, 29), item('綠茶', 1, 28)])
+    expect(shape(await edit(r, ['綠茶', '綠茶', '某品']))).toEqual([
+      ['綠茶', 1, 29],
+      ['綠茶', 1, 28],
+      ['某品', 1, null],
+    ])
+  })
+
+  it('刪掉第二個同名品項：留下第一個', async () => {
+    const r = await withItems([item('洗衣精', 1, 369), item('回饋金', 1, -90), item('洗衣精', 3, 111)])
+    expect(shape(await edit(r, ['洗衣精', '回饋金']))).toEqual([
+      ['洗衣精', 1, 369],
+      ['回饋金', 1, -90],
+    ])
+  })
+
+  it('換順序：同名品項依原本的順序配對', async () => {
+    const r = await withItems([item('洗衣精', 1, 369), item('洗衣精', 3, 111), item('回饋金', 1, -90)])
+    expect(shape(await edit(r, ['回饋金', '洗衣精', '洗衣精']))).toEqual([
+      ['回饋金', 1, -90],
+      ['洗衣精', 1, 369],
+      ['洗衣精', 3, 111],
+    ])
+  })
+
+  // 舊的品名 Map 是後值勝，這個情境碰巧對；修正後仍須成立
+  it('刪掉第一個同名品項：留下第二個', async () => {
+    const r = await withItems([item('洗衣精', 1, 369), item('回饋金', 1, -90), item('洗衣精', 3, 111)])
+    expect(shape(await edit(r, ['回饋金', '洗衣精']))).toEqual([
+      ['回饋金', 1, -90],
+      ['洗衣精', 3, 111],
+    ])
+  })
+
+  it('相鄰的同名品項刪掉一個：分不出刪的是哪個，保留前面那個', async () => {
+    const r = await withItems([item('綠茶', 1, 29), item('綠茶', 1, 28)])
+    expect(shape(await edit(r, ['綠茶']))).toEqual([['綠茶', 1, 29]])
+  })
+
+  it('使用者指定的逐項分類：同名品項各自保留', async () => {
+    const r = await withItems([item('綠茶', 1, 29, 'drink'), item('綠茶', 1, 28, 'daily')], {
+      categorySource: 'user',
+    })
+    const out = await computeRecordUpdate(
+      storage,
+      r,
+      { itemNames: ['綠茶', '綠茶', '某品'] },
+      { now: NOW + 1, reclassify: false },
+    )
+    expect(out.record.items.map((i) => i.categoryId)).toEqual(['drink', 'daily', null])
+  })
+
+  it('再加一個同名品項：前兩個各自保留，第三個是新品項', async () => {
+    const r = await withItems([item('綠茶', 1, 29), item('綠茶', 1, 28)])
+    expect(shape(await edit(r, ['綠茶', '綠茶', '綠茶']))).toEqual([
+      ['綠茶', 1, 29],
+      ['綠茶', 1, 28],
+      ['綠茶', 1, null],
+    ])
   })
 })
 
