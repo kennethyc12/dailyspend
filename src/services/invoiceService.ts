@@ -54,8 +54,8 @@ export async function createFromInvoice(
   const items: RecordItem[] = recognized.items.map((item, i) => ({
     name: item.name,
     qty: item.qty,
-    // 規格的「單價」欄語意未定（單價或小計），寫進任一欄都是猜。
-    // 原始數字留在 rawRecognition，確認語意之後再回填。
+    // 品項那欄不寫進 unitPrice/amount（design.md §5.3）：沒有總計額時核對不了品項是否齊全。
+    // 原始數字留在 rawRecognition，政策改變時可以回填。
     unitPrice: null,
     amount: null,
     categoryId: classified.itemCategoryIds[i] ?? null,
@@ -87,7 +87,7 @@ export async function createFromInvoice(
     // §5.2.1：QR 真的解出欄位了才改成 'photo'，這會提升 §7.3 的 merge 優先序。
     sourceType: recognized.confidence > 0 ? 'photo' : 'manual',
     photoId: photo?.id ?? null,
-    // 語意未定的欄位（品項的單價/小計）原樣留著，日後確認後可回填。
+    // 品項的原始數字原樣留著，政策改變時可以回填（design.md §5.3）。
     rawRecognition: recognized,
     note: '',
     createdAt: now,

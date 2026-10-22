@@ -31,8 +31,8 @@ export function normalizeInvoiceNumber(raw: string | null): string | null {
 /**
  * 台灣電子發票號碼的標準格式是 2 個英文字母 + 8 位數字。
  *
- * 這只用於 UI 提示，**不用於擋下寫入**：QR 樣本還沒到手，現在就把非標準格式
- * 的號碼判定為無效，等於拿假設去阻斷去重。寧可收下再提示。
+ * 這只用於 UI 提示，**不用於擋下寫入**：非標準格式的號碼仍可能是真的，拿格式
+ * 去阻斷去重，錯殺的代價是同一張發票存成兩筆。寧可收下再提示。
  */
 export function isStandardInvoiceNumber(n: string | null): boolean {
   return n !== null && /^[A-Z]{2}\d{8}$/.test(n)

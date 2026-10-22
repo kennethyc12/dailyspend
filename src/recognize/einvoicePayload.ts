@@ -132,9 +132,9 @@ export interface RecognizedItem {
   name: string
   qty: number
   /**
-   * 規格把這欄叫「單價」，但第一張實拍樣本無法分辨它是單價還是小計
-   * （`白蘭氏雞精組:2:1479`，2×1479 與 1479 都說得通）。語意未定之前
-   * 不寫進 `RecordItem.unitPrice` 或 `.amount`，只原樣帶著給人看。
+   * 規格把這欄叫「單價」，一張實拍樣本支持這個讀法、還沒有反例。
+   * 但沒有總計額時無法核對品項是否齊全，所以不寫進 `RecordItem.unitPrice`
+   * 或 `.amount`，只原樣帶著給人看（design.md §5.3）。
    */
   value: number
 }
@@ -186,8 +186,8 @@ function parseTriplets(
 /**
  * 把一張發票上解到的所有 payload 合成一組欄位。
  *
- * **金額只採信左方 QR 的總計額**，不從品項加總推算：品項那欄的語意（單價
- * 或小計）還沒被任何樣本確認，猜錯會默默存進錯的數字。
+ * **金額只採信左方 QR 的總計額**，不從品項加總推算：沒有表頭時無法核對品項
+ * 是否齊全，折扣品目也可能不在 QR 裡（design.md §5.3）。
  */
 export function parseEInvoicePayload(texts: string[]): RecognizedInvoice {
   const notes: string[] = []

@@ -323,10 +323,10 @@ async function submitSample() {
         />
       </label>
 
-      <!-- 品項那欄的「單價」語意未定，所以不幫忙加總；寧可讓人自己看發票。 -->
+      <!-- 沒有總計額時無法核對品項是否齊全，所以不幫忙加總；寧可讓人自己看發票。 -->
       <p v-if="invoiceTotal === null && invoiceItemCount" class="hint">
-        上面的「數量 × 數字」直接來自發票，但規格沒說清楚那是單價還是小計，
-        所以不替你加總。
+        上面的「數量 × 數字」直接來自發票。這張發票沒有總計額，
+        無法核對品項是否齊全，所以不替你加總。
       </p>
 
       <ul v-if="invoice.notes.length" class="list notes">

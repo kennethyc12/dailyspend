@@ -167,8 +167,8 @@ async function copy(text: string) {
     <h1>QR 實驗室</h1>
     <p class="hint">
       同一張照片用四種壓縮設定各解一次，看解到幾個碼、耗時多少，並把 payload 原封不動
-      列出來。選型已定案為 zxing-wasm（design.md §5.2）；這一頁留著，是因為欄位切法
-      要靠真實 payload 決定。
+      列出來。選型已定案為 zxing-wasm（design.md §5.2），欄位切法也已依樣本實作；
+      這一頁留著，用來看新樣本的原始 payload，例如第一次遇到 Big5 或 Base64 時。
     </p>
 
     <section class="panel">

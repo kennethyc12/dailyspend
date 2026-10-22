@@ -81,7 +81,7 @@ describe('從發票存檔', () => {
     expect((await only()).categoryId).toBe('drink')
   })
 
-  it('單價語意未定，所以不寫進 unitPrice/amount，原始值留在 rawRecognition', async () => {
+  it('品項的數字不寫進 unitPrice/amount，原始值留在 rawRecognition', async () => {
     await createFromInvoice(
       storage,
       { recognized: recognized(), merchant: '全家', amount: null },

@@ -5,11 +5,11 @@ import wasmUrl from 'zxing-wasm/reader/zxing_reader.wasm?url'
  * QR 偵測。選型結果見 design.md §5.2：zxing-wasm 能一次解到一張圖上並排的
  * 兩個碼，jsQR 在同樣的圖上整張失敗，所以 v1 只留這一套（§13.3）。
  *
- * 這裡只負責「把圖變成 payload」，欄位切法在 parseEInvoicePayload（待樣本）。
+ * 這裡只負責「把圖變成 payload」，欄位切法在 parseEInvoicePayload。
  */
 export interface DetectedCode {
   text: string
-  /** 右 QR 的品項可能是 Big5 或 Base64，所以原始位元組要留著自己判斷。 */
+  /** 品項目前只遇過 UTF-8，但 Big5、Base64 都可能出現，所以原始位元組要留著自己判斷。 */
   bytes: Uint8Array
   rotation: number
 }
