@@ -60,6 +60,7 @@
 | backup-reminder | 記帳頁補回備份提醒橫幅（Phase 7 起遺失），點了進備份頁 | ✅ | ✅ | 2026-10-18 真機驗收通過：符合條件時記帳頁出現橫幅、點了進備份頁、完整備份後回記帳頁消失、取消分享時仍在、亮色暗色都清楚 |
 | B7b | 刪沒在用的 port 與設定項（D4），`invoiceKey` 改用共用日期檢查 | ✅ | ✅ | 2026-10-22 真機驗收通過：記一筆文字存檔、分析頁、設定頁、匯出備份正常，錯誤紀錄沒有新增 |
 | B7c | 「（無店家）」抽常數；沒有類別的紀錄改叫「未分類」，「待確認」只指狀態 | ✅ | ✅ | 2026-10-22 真機驗收通過：待確認卡「確認（目前為 未分類）」、確認後紀錄頁只剩「未分類」、待確認中顯示「未分類 · 待確認」、搜「未分類」找得到、CSV 類別欄是「未分類」、「（無店家）」照常顯示 |
+| B8 | 文件、註解與畫面提示對齊現況 | ✅ | ✅ | 2026-10-22 真機驗收通過：記一筆沒有總計額的發票顯示新提示、斷行正常；QR 實驗室頁說明文字是新說法 |
 
 ---
 
@@ -346,6 +347,8 @@ CI 加上 `npm run lint`，`package.json` 加上 `engines: node >=22`。
 ### Commit 紀錄
 
 ```
+333a9ac 記錄 B7c 真機確認通過
+fa21d8b docs(b8): 文件、註解與畫面提示對齊現況
 fcbaab7 記錄 B7b 真機確認通過
 a505305 refactor(b7c): 「（無店家）」抽成 NO_MERCHANT 常數
 60ce50b fix(b7c): 沒有類別的紀錄改叫「未分類」，「待確認」只指狀態
@@ -452,7 +455,7 @@ v1 的程式寫完了。接下來最有價值的不是寫功能，是**讓真實
 | **backup-reminder** ✅ | 備份提醒橫幅補回記帳頁（Phase 7 `4045778` 刪 HomeView 時遺失）：從未備份且 ≥ 20 筆或距上次備份超過 7 天時顯示，點了進 `/backup`，沿用 Phase 6 文案與樣式；design.md §11.2「可一鍵匯出」改成「點橫幅進備份頁匯出」（iOS 手勢限制，使用者委託 chris 判定）；FEATURES 同步；頁面測試補上 7 天邊界與「等 persist 期間備份」 | 不做「稍後提醒」（使用者決定）；還原後立刻跳提醒見 ticket；App 從背景回來不會重新 mount，橫幅可能過期，重新評估觸發點：使用者回報提醒沒出現或沒消失 |
 | **B7b** ✅ | 刪 `RuleClassifier`／`ClassifierPort`（偏離 design.md §6.4，使用者同意）、店家字典 `merchantDictionary`／`merchantMatched`、沒有讀取者的設定鍵（`defaults.date`、`defaults.categoryFallback`、`parsing`、`export.encoding`、`repeatPurchase.similarity`）、`categoryCount`／`ruleCount`；`invoiceKey.ts` 改用 `dates.ts` 的 `isValidIsoDate`／`parseIso`；守門測試：帶舊鍵的 settings 第一次 seed 之後不再寫回；`RecognizerPort` 只在文件標「已評估、未採用」 | 不做 migration，舊裝置與備份檔殘留舊鍵、帶舊鍵的裝置第一次開啟寫回 settings 1 次；`close`、`confirmRecord`、`toIdbRange` 轉出、`runBlobRoundTrip`、`isStandardInvoiceNumber` 記成「死 code 清點」ticket |
 | **B7c** ✅ | 「（無店家）」7 處改用 `src/models/labels.ts` 的 `NO_MERCHANT`；`categoryId === null` 在畫面與 CSV 改叫「未分類」（`UNCATEGORIZED`），「待確認」只指 `status: pending`；`analyze.ts` 的 `nameOf` 只收 `string`、刪掉走不到的 null 分支；新增 `RecordsView.test.ts`；改 `PendingView.test.ts:242`、`backup.test.ts:109-111` 與 design.md:190（使用者同意） | **使用者可見**：CSV 類別欄的值從「待確認」改為「未分類」，舊匯出檔不會改寫；紀錄頁搜「待確認」不再找到沒有類別的紀錄（搜尋本來就不比對狀態）。null 類別仍是 `warn` 樣式。「null → 標籤」兩份實作記 ticket |
-| **B8** | 文件同步 | FEATURES.md:76「共 10 種」待確認原因（現在 11 種）、文件裡的測試數、design.md §3.7／§4.4 的新規則、「單價語意未定」的舊說法（FEATURES.md、`einvoicePayload.ts`、`invoiceService.ts`、`QuickInputView.vue:278-280`）、本文件「開發指令」的 CI 流程漏了 lint；編碼相關的舊說法：`FEATURES.md:136`「品項編碼已由實拍樣本確認是 UTF-8」、`design.md` §5.2.2「品項的編碼是 Base64 還是 Big5」、`design.md` §12〈#1 樣本可以延後到 Phase 9〉表格「QR 原始文字」那一列（還寫著「品項編碼…⏳ 仍缺」）、`qrDetect.ts:12` 的註解漏了 UTF-8 |
+| **B8** ✅ | 文件同步：待確認原因 11 種、design.md §3.7／§4.4 補 `tokens_after_amount`；單價不加總的理由改成「沒有總計額時無法核對品項是否齊全」（FEATURES、註解、記一筆提示、測試名稱）；編碼與合規樣本現況；FEATURES〈數字〉表標統計日期、README 拿掉測試數；開發指令補 lint；清單外同類舊說法一併改（README:27、PROGRESS 現況段、QR 實驗室頁說明） | 〈數字〉表每批都會過時，已標統計日期與 commit；若之後每批都要更新，再考慮刪表 |
 
 另外二十四張 ticket：
 - 返回分析頁時展開與捲動消失：從佐證清單點進一筆再「← 返回」，清單收合、可能回到頁首（沒有 `keep-alive`、`scrollBehavior`）。使用者 2026-10-17 決定接受。觸發點：真機回報看完一筆回來找不到原本那條
