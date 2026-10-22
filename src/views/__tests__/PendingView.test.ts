@@ -239,7 +239,7 @@ describe('原始輸入與縮圖（B4.2b-1）', () => {
   const confirmIn = (wrapper: VueWrapper, merchant: string) =>
     card(wrapper, merchant)
       .findAll('button')
-      .find((b) => b.text() === '確認（目前為 待確認）')!
+      .find((b) => b.text() === '確認（目前為 未分類）')!
       .trigger('click')
 
   const createUrl = () => vi.mocked(URL.createObjectURL)

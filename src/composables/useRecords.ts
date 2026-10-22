@@ -1,5 +1,6 @@
 import { computed, shallowRef } from 'vue'
 import type { Category, SpendRecord } from '@/models/types'
+import { UNCATEGORIZED } from '@/models/labels'
 import { getStorage } from '@/storage'
 
 // shallowRef 不是偏好而是必要：這些物件之後會寫回 IndexedDB，
@@ -14,7 +15,7 @@ export const pendingRecords = computed(() =>
 
 export const categoryName = computed(() => {
   const map = new Map(categories.value.map((c) => [c.id, c.name]))
-  return (id: string | null) => (id === null ? '待確認' : (map.get(id) ?? id))
+  return (id: string | null) => (id === null ? UNCATEGORIZED : (map.get(id) ?? id))
 })
 
 export const activeCategories = computed(() =>

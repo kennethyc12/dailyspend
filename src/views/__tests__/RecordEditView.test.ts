@@ -85,6 +85,12 @@ describe('編輯紀錄', () => {
     const after = await storage().get<SpendRecord>('records', before.id)
     expect(after!.note).toBe('公司聚餐')
   })
+
+  it('沒有類別的紀錄：分類區寫「目前：未分類」', async () => {
+    const r = await textRecord('某店 100')
+    const wrapper = await openEditor(r.id)
+    expect(wrapper.text()).toContain('目前：未分類（')
+  })
 })
 
 describe('編輯紀錄：不能默默改壞資料', () => {

@@ -106,9 +106,9 @@ describe('CSV', () => {
     expect(row).toContain('飲料')
   })
 
-  it('未分類輸出「待確認」', () => {
+  it('未分類輸出「未分類」', () => {
     const csv = toCsv([rec({ categoryId: null })])
-    expect(csv).toContain('待確認')
+    expect(csv).toContain('未分類')
   })
 
   it('含逗號、引號、換行的欄位會正確跳脫', () => {

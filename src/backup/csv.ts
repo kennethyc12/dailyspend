@@ -1,4 +1,5 @@
 import type { Category, SpendRecord } from '@/models/types'
+import { UNCATEGORIZED } from '@/models/labels'
 
 export const CSV_COLUMNS = [
   'date',
@@ -34,7 +35,7 @@ export function toCsv(records: SpendRecord[], opts: CsvOptions = {}): string {
 
   for (const r of records) {
     const category =
-      r.categoryId === null ? '待確認' : (names.get(r.categoryId) ?? r.categoryId)
+      r.categoryId === null ? UNCATEGORIZED : (names.get(r.categoryId) ?? r.categoryId)
 
     const cells = [
       r.date,

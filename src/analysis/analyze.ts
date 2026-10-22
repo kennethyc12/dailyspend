@@ -40,8 +40,7 @@ function variationPct(xs: number[]): number {
   return (sd / m) * 100
 }
 
-function nameOf(categories: Category[], id: string | null): string {
-  if (id === null) return '待確認'
+function nameOf(categories: Category[], id: string): string {
   return categories.find((c) => c.id === id)?.name ?? id
 }
 

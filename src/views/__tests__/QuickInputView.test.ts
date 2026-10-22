@@ -72,6 +72,18 @@ describe('記一筆：文字輸入', () => {
     expect(records[0]).toMatchObject({ merchant: '全家', amount: 55, sourceType: 'manual' })
     expect(wrapper.text()).toContain('已存：全家')
   })
+
+  it('分不了類的一筆：已存提示的類別寫「未分類」', async () => {
+    const wrapper = await mountView(QuickInputView)
+    await settled(wrapper)
+
+    await wrapper.find('input.entry').setValue('某店 100')
+    await button(wrapper, '存檔').trigger('click')
+    await settled(wrapper)
+
+    // 「今天」清單也有類別欄，連著金額比對才是已存提示那一行
+    expect(wrapper.text()).toContain('$100 · 未分類')
+  })
 })
 
 describe('記一筆：發票照片', () => {

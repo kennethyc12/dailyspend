@@ -187,7 +187,7 @@ IndexedDB database `dailyspend`，schema version 1。
 | `merchant` | string | 店家 |
 | `amount` | number | **整數，單位元。禁止浮點數**，寫入前 `Number.isInteger` 斷言 |
 | `items` | `RecordItem[]` | 見 3.2，可為空陣列 |
-| `categoryId` | string \| null | null 代表待確認 |
+| `categoryId` | string \| null | ~~null 代表待確認~~ null 代表未分類（B7c，2026-10-22，使用者同意；畫面與 CSV 顯示「未分類」，「待確認」只指 status） |
 | `categorySource` | `'rule' \| 'user' \| 'ai'` | 分類來源 |
 | `classifyConfidence` | number | 0–1，分類信心（v0.1 名為 `confidence`） |
 | `recognizeConfidence` | number \| null | 0–1，辨識信心，無照片為 null |

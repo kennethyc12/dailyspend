@@ -447,12 +447,11 @@ v1 的程式寫完了。接下來最有價值的不是寫功能，是**讓真實
 | **B7a** ✅ | `initStorage` 單一入口：呼叫後保證完成一次完整執行，執行中再呼叫就排一輪、排隊前的呼叫合併；第 37 行寫回 `persistGranted` 改用 `updateSettings`（settings 中途被刪就初始化失敗）；還原後待確認紅點立刻更新 | 一支 API（推翻 research 原建議的兩支，chris 判斷、使用者同意）；冷啟動會跑兩輪，重新評估觸發點：真機冷啟動「準備中…」明顯變長；排隊等重讀時又有第三輪，failed 判斷可能漏掉第二輪的失敗，接受（觸發點：真機「還原完成」但資料沒載入） |
 | **backup-reminder** ✅ | 備份提醒橫幅補回記帳頁（Phase 7 `4045778` 刪 HomeView 時遺失）：從未備份且 ≥ 20 筆或距上次備份超過 7 天時顯示，點了進 `/backup`，沿用 Phase 6 文案與樣式；design.md §11.2「可一鍵匯出」改成「點橫幅進備份頁匯出」（iOS 手勢限制，使用者委託 chris 判定）；FEATURES 同步；頁面測試補上 7 天邊界與「等 persist 期間備份」 | 不做「稍後提醒」（使用者決定）；還原後立刻跳提醒見 ticket；App 從背景回來不會重新 mount，橫幅可能過期，重新評估觸發點：使用者回報提醒沒出現或沒消失 |
 | **B7b** ✅ | 刪 `RuleClassifier`／`ClassifierPort`（偏離 design.md §6.4，使用者同意）、店家字典 `merchantDictionary`／`merchantMatched`、沒有讀取者的設定鍵（`defaults.date`、`defaults.categoryFallback`、`parsing`、`export.encoding`、`repeatPurchase.similarity`）、`categoryCount`／`ruleCount`；`invoiceKey.ts` 改用 `dates.ts` 的 `isValidIsoDate`／`parseIso`；守門測試：帶舊鍵的 settings 第一次 seed 之後不再寫回；`RecognizerPort` 只在文件標「已評估、未採用」 | 不做 migration，舊裝置與備份檔殘留舊鍵、帶舊鍵的裝置第一次開啟寫回 settings 1 次；`close`、`confirmRecord`、`toIdbRange` 轉出、`runBlobRoundTrip`、`isStandardInvoiceNumber` 記成「死 code 清點」ticket |
-| **B7c** | 重複文案（「（無店家）」）與「待確認」的兩種意思（null 類別 vs `status: pending`） | 改名「未分類」要改 `PendingView.test.ts:242`、`backup.test.ts:111` 的斷言與 design.md:184，使用者本人決定 |
+| **B7c** | 重複文案（「（無店家）」）與「待確認」的兩種意思（null 類別 vs `status: pending`） | 改名「未分類」要改 `PendingView.test.ts:242`、`backup.test.ts:111` 的斷言與 design.md:190，使用者本人決定 |
 | **B8** | 文件同步 | FEATURES.md:76「共 10 種」待確認原因（現在 11 種）、文件裡的測試數、design.md §3.7／§4.4 的新規則、「單價語意未定」的舊說法（FEATURES.md、`einvoicePayload.ts`、`invoiceService.ts`、`QuickInputView.vue:278-280`）、本文件「開發指令」的 CI 流程漏了 lint；編碼相關的舊說法：`FEATURES.md:136`「品項編碼已由實拍樣本確認是 UTF-8」、`design.md` §5.2.2「品項的編碼是 Base64 還是 Big5」、`design.md` §12〈#1 樣本可以延後到 Phase 9〉表格「QR 原始文字」那一列（還寫著「品項編碼…⏳ 仍缺」）、`qrDetect.ts:12` 的註解漏了 UTF-8 |
 
 另外二十四張 ticket：
 - 返回分析頁時展開與捲動消失：從佐證清單點進一筆再「← 返回」，清單收合、可能回到頁首（沒有 `keep-alive`、`scrollBehavior`）。使用者 2026-10-17 決定接受。觸發點：真機回報看完一筆回來找不到原本那條
-- 「（無店家）」文案在 7 處重複（RecordsView、PendingView、BackupView×2、QuickInputView×2、FindingItem）。觸發點：這段文案要改時
 - `RecordEditView.test.ts`「略過逐項指定」在全套 `--sequence.shuffle` 下偶發失敗（chris 審 B6a 時 20 次紅 2 次；base `22e2cbf` 跑 6 次未重現，推測是既有時序問題，與 B6a 無關）。B6b 審閱時補充：單檔 30 seeds 紅 5 次，「逐項指定分類」也會紅，失敗的都排在檔內第 1～2 位，base `edb94f3` 同樣重現；推測是第一個測試冷啟動超過 `waitFor` 的 1000ms。觸發點：CI 或一般執行也紅
 - 設定頁照片壓縮的無效輸入靜默忽略：`updatePhotoSetting` 在 `value <= 0` 時直接 return、沒有提示，`quality` 大於 1 也接受（B6a 只做分析頁）。觸發點：真機改壞照片參數，或 9b-3 驗收時
 - jsdom 的 `DOMException` 不是 `Error` 子類，錯誤紀錄的 message 會記成 `{}`（測試因此只斷言 where 與筆數）。推測真機不會（WebIDL 規定原型是 `Error.prototype`）。觸發點：真機錯誤紀錄出現 `{}`
@@ -474,7 +473,8 @@ v1 的程式寫完了。接下來最有價值的不是寫功能，是**讓真實
 - 重跑時記憶體 settings 被蓋回：`runInit` 的 `settings.value = current` 在 `requestPersist` 之後才執行，這段期間在設定頁改了照片壓縮，記憶體裡的值會被蓋回舊的（DB 是對的）。觸發點：真機回報照片壓縮欄位跳回舊值
 - 備份頁不等初始化：`BackupView` 的 `onMounted(prepareFiles)` 不等 `initStorage`，首次安裝後直接冷啟動進 `/backup` 時，匯出檔可能在 seed 之前就組好。機率極低。觸發點：使用者回報第一次的匯出檔是空的
 - 還原後立刻跳提醒：備份檔裡的 `lastBackupAt` 是匯出前的值（`markBackedUp` 在匯出之後才寫），`restoreBackup` 整份覆蓋 settings，所以用最新備份還原後可能馬上顯示「該備份了」。使用者 2026-10-18 決定接受。觸發點：真機遇到時覺得吵
-- 死 code 清點：`StoragePort.close`（adapter 有實作、正式程式沒呼叫端）、`confirmRecord`（只有 `entryService.test.ts`、`carrierImportService.test.ts` 在用）、`storage/index.ts` 的 `toIdbRange` 轉出（沒人從 index 匯入）、`runBlobRoundTrip`／`BlobRoundTrip`（Phase 2 真機自檢，沒有呼叫端）、`isStandardInvoiceNumber`（design.md:705 說「只供 UI 提示」，UI 沒接）。B7b 不動（使用者 2026-10-18 決定）。觸發點：下一次清理 port 或 storage 介面時
+- 死 code 清點：`StoragePort.close`（adapter 有實作、正式程式沒呼叫端）、`confirmRecord`（只有 `entryService.test.ts`、`carrierImportService.test.ts`、`RecordsView.test.ts` 在用）、`storage/index.ts` 的 `toIdbRange` 轉出（沒人從 index 匯入）、`runBlobRoundTrip`／`BlobRoundTrip`（Phase 2 真機自檢，沒有呼叫端）、`isStandardInvoiceNumber`（design.md:705 說「只供 UI 提示」，UI 沒接）。B7b 不動（使用者 2026-10-18 決定）。觸發點：下一次清理 port 或 storage 介面時
+- 「null 類別 → 標籤，否則查表」有兩份實作：`useRecords.ts` 的 `categoryName` 與 `csv.ts` 的 `toCsv`（B7c 只把文案換成 `UNCATEGORIZED` 常數，沒合併）。觸發點：要改類別名稱的 fallback 時（例如刪除類別後的顯示）
 
 已評估、未採用：沒有總計額時用品項加總帶入金額（見 design.md §5.3 的觸發點）。
 
