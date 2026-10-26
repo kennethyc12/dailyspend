@@ -63,6 +63,7 @@
 | B8 | 文件、註解與畫面提示對齊現況 | ✅ | ✅ | 2026-10-22 真機驗收通過：記一筆沒有總計額的發票顯示新提示、斷行正常；QR 實驗室頁說明文字是新說法 |
 | same-name-items | 編輯品項時同名品項各自保留數量、金額與分類 | ✅ | ✅ | 2026-10-23 真機驗收通過：載具匯入含同名品項的紀錄加一行品項後，兩個同名品項的數量與金額不變 |
 | entryservice-tz-test | 「昨天」前綴測試改用本地日期，台北清晨不再必紅 | ✅ | — | 只改測試，不需真機；`TZ=Asia/Taipei` 與 `TZ=UTC` 全套皆 625 passed |
+| bulk-delete | 紀錄頁多選刪除，刪除前強制存保險備份 | ✅ | ✅ | 2026-10-26 真機驗收通過：勾選與點整列、全選目前結果、底部列不被分頁列蓋住、確認區塊文案與捲動、iOS 分享保險備份與取消、刪除後回饋與紅點、用保險備份還原。「改搜尋關鍵字後勾選清空」用中文輸入法時勾勾似乎仍在，jsdom（含模擬組字）重現不出來，記 ticket 待重現 |
 
 ---
 
@@ -349,6 +350,8 @@ CI 加上 `npm run lint`，`package.json` 加上 `engines: node >=22`。
 ### Commit 紀錄
 
 ```
+beb1fe6 feat(bulk-delete): 紀錄頁多選刪除，刪除前強制存保險備份
+0bc9b22 記錄 entryservice-tz-test 完成
 02b3763 記錄 same-name-items 真機確認通過
 5960912 fix(entryservice-tz-test): 「昨天」前綴測試改用本地日期，台北清晨不再必紅
 5895a0e 記錄 B8 真機確認通過
@@ -463,8 +466,9 @@ v1 的程式寫完了。接下來最有價值的不是寫功能，是**讓真實
 | **B7c** ✅ | 「（無店家）」7 處改用 `src/models/labels.ts` 的 `NO_MERCHANT`；`categoryId === null` 在畫面與 CSV 改叫「未分類」（`UNCATEGORIZED`），「待確認」只指 `status: pending`；`analyze.ts` 的 `nameOf` 只收 `string`、刪掉走不到的 null 分支；新增 `RecordsView.test.ts`；改 `PendingView.test.ts:242`、`backup.test.ts:109-111` 與 design.md:190（使用者同意） | **使用者可見**：CSV 類別欄的值從「待確認」改為「未分類」，舊匯出檔不會改寫；紀錄頁搜「待確認」不再找到沒有類別的紀錄（搜尋本來就不比對狀態）。null 類別仍是 `warn` 樣式。「null → 標籤」兩份實作記 ticket |
 | **B8** ✅ | 文件同步：待確認原因 11 種、design.md §3.7／§4.4 補 `tokens_after_amount`；單價不加總的理由改成「沒有總計額時無法核對品項是否齊全」（FEATURES、註解、記一筆提示、測試名稱）；編碼與合規樣本現況；FEATURES〈數字〉表標統計日期、README 拿掉測試數；開發指令補 lint；清單外同類舊說法一併改（README:27、PROGRESS 現況段、QR 實驗室頁說明） | 〈數字〉表每批都會過時，已標統計日期與 commit；若之後每批都要更新，再考慮刪表 |
 | **same-name-items** ✅ | `computeRecordUpdate` 原本用品名建 Map 對回舊品項，同名品項全拿到最後一個的值；改用 `matchItems`（頭尾相同的依位置，中段同名的依舊順序，相鄰同名刪一個保留前面那個）；design.md:979 與 `RecordPatch.itemNames` 註解對齊實況 | **修正前編輯過同名品項的紀錄不會自動修復**；QR 品名頭尾空白、「同名保留 categoryId」與重分類不一致另記 ticket |
+| **bulk-delete** ✅ | 紀錄頁「選取」模式：逐筆勾選或全選目前搜尋結果，改關鍵字清空勾選；`prepareBulkDelete`／`commitBulkDelete` 讓保險備份在 API 上強制（同還原）；確認區塊列筆數、合計、照片數、發票數與規則不刪；`deleteRecords` 為唯一刪除點，讀 DB 當下的 `photoId`（單筆刪除一併修正快照過期時刪到別筆照片、留下孤兒照片） | 單筆刪除不強制保險備份；依匯入批次撤銷、依月份／來源篩選、`hitCount` 不倒回另記 ticket；merge-provenance、tombstone、規則清單多選刪除已評估、未採用（DECISIONS） |
 
-另外二十七張 ticket：
+另外二十八張 ticket：
 - 返回分析頁時展開與捲動消失：從佐證清單點進一筆再「← 返回」，清單收合、可能回到頁首（沒有 `keep-alive`、`scrollBehavior`）。使用者 2026-10-17 決定接受。觸發點：真機回報看完一筆回來找不到原本那條
 - `RecordEditView.test.ts`「略過逐項指定」在全套 `--sequence.shuffle` 下偶發失敗（chris 審 B6a 時 20 次紅 2 次；base `22e2cbf` 跑 6 次未重現，推測是既有時序問題，與 B6a 無關）。B6b 審閱時補充：單檔 30 seeds 紅 5 次，「逐項指定分類」也會紅，失敗的都排在檔內第 1～2 位，base `edb94f3` 同樣重現；推測是第一個測試冷啟動超過 `waitFor` 的 1000ms。觸發點：CI 或一般執行也紅
 - 設定頁照片壓縮的無效輸入靜默忽略：`updatePhotoSetting` 在 `value <= 0` 時直接 return、沒有提示，`quality` 大於 1 也接受（B6a 只做分析頁）。觸發點：真機改壞照片參數，或 9b-3 驗收時
@@ -492,6 +496,7 @@ v1 的程式寫完了。接下來最有價值的不是寫功能，是**讓真實
 - 依匯入批次撤銷（bulk-delete 評估後不做）：紀錄沒有匯入批次識別，合併過的紀錄也回不到合併前的樣子，要改 schema 與備份格式。目前用「搜尋 → 全選目前結果 → 刪除」代替。觸發點：搜尋加全選圈不出某次匯入的範圍
 - 紀錄頁沒有依月份或來源篩選（bulk-delete 不做）：多選刪除只能靠搜尋店家、品項、類別圈範圍。觸發點：要刪某個月或所有載具紀錄時，搜尋加全選不夠用
 - 刪紀錄不倒回規則的 `hitCount`／`lastHitAt`（bulk-delete 決定不做）：刪測試資料後設定頁的「命中 N 次」會偏高；`hitCount` 只用於顯示，不影響分類排序（`matching.ts`）。要倒回得記錄每次命中來源。觸發點：使用者覺得命中次數誤導
+- 多選刪除：iOS 用中文輸入法改搜尋關鍵字後，列上的勾勾似乎沒清空（2026-10-26 真機驗收回報，當時沒注意底部「已選」列與列表是否已篩選）。jsdom 下一般輸入與模擬組字都會清空；組字中（還沒選字）關鍵字不更新，勾選維持是預期行為。下次照這個順序觀察：勾 2 筆 → 打中文並選字送出 → 看列表是否篩選、底部列是否消失、勾勾是否還在 → 再用英文試一次。底部列還在＝狀態沒清（看 `watch(keyword)`／v-model 組字）；底部列消失但勾勾在＝DOM 的 `checked` 沒同步（可改成依 `selected` 重建 checkbox）。觸發點：再次重現
 
 已評估、未採用：沒有總計額時用品項加總帶入金額（見 design.md §5.3 的觸發點）。
 
