@@ -464,7 +464,7 @@ v1 的程式寫完了。接下來最有價值的不是寫功能，是**讓真實
 | **B8** ✅ | 文件同步：待確認原因 11 種、design.md §3.7／§4.4 補 `tokens_after_amount`；單價不加總的理由改成「沒有總計額時無法核對品項是否齊全」（FEATURES、註解、記一筆提示、測試名稱）；編碼與合規樣本現況；FEATURES〈數字〉表標統計日期、README 拿掉測試數；開發指令補 lint；清單外同類舊說法一併改（README:27、PROGRESS 現況段、QR 實驗室頁說明） | 〈數字〉表每批都會過時，已標統計日期與 commit；若之後每批都要更新，再考慮刪表 |
 | **same-name-items** ✅ | `computeRecordUpdate` 原本用品名建 Map 對回舊品項，同名品項全拿到最後一個的值；改用 `matchItems`（頭尾相同的依位置，中段同名的依舊順序，相鄰同名刪一個保留前面那個）；design.md:979 與 `RecordPatch.itemNames` 註解對齊實況 | **修正前編輯過同名品項的紀錄不會自動修復**；QR 品名頭尾空白、「同名保留 categoryId」與重分類不一致另記 ticket |
 
-另外二十四張 ticket：
+另外二十七張 ticket：
 - 返回分析頁時展開與捲動消失：從佐證清單點進一筆再「← 返回」，清單收合、可能回到頁首（沒有 `keep-alive`、`scrollBehavior`）。使用者 2026-10-17 決定接受。觸發點：真機回報看完一筆回來找不到原本那條
 - `RecordEditView.test.ts`「略過逐項指定」在全套 `--sequence.shuffle` 下偶發失敗（chris 審 B6a 時 20 次紅 2 次；base `22e2cbf` 跑 6 次未重現，推測是既有時序問題，與 B6a 無關）。B6b 審閱時補充：單檔 30 seeds 紅 5 次，「逐項指定分類」也會紅，失敗的都排在檔內第 1～2 位，base `edb94f3` 同樣重現；推測是第一個測試冷啟動超過 `waitFor` 的 1000ms。觸發點：CI 或一般執行也紅
 - 設定頁照片壓縮的無效輸入靜默忽略：`updatePhotoSetting` 在 `value <= 0` 時直接 return、沒有提示，`quality` 大於 1 也接受（B6a 只做分析頁）。觸發點：真機改壞照片參數，或 9b-3 驗收時
@@ -489,6 +489,9 @@ v1 的程式寫完了。接下來最有價值的不是寫功能，是**讓真實
 - 還原後立刻跳提醒：備份檔裡的 `lastBackupAt` 是匯出前的值（`markBackedUp` 在匯出之後才寫），`restoreBackup` 整份覆蓋 settings，所以用最新備份還原後可能馬上顯示「該備份了」。使用者 2026-10-18 決定接受。觸發點：真機遇到時覺得吵
 - 死 code 清點：`StoragePort.close`（adapter 有實作、正式程式沒呼叫端）、`confirmRecord`（只有 `entryService.test.ts`、`carrierImportService.test.ts`、`RecordsView.test.ts` 在用）、`storage/index.ts` 的 `toIdbRange` 轉出（沒人從 index 匯入）、`runBlobRoundTrip`／`BlobRoundTrip`（Phase 2 真機自檢，沒有呼叫端）、`isStandardInvoiceNumber`（design.md:705 說「只供 UI 提示」，UI 沒接）。B7b 不動（使用者 2026-10-18 決定）。觸發點：下一次清理 port 或 storage 介面時
 - 「null 類別 → 標籤，否則查表」有兩份實作：`useRecords.ts` 的 `categoryName` 與 `csv.ts` 的 `toCsv`（B7c 只把文案換成 `UNCATEGORIZED` 常數，沒合併）。觸發點：要改類別名稱的 fallback 時（例如刪除類別後的顯示）
+- 依匯入批次撤銷（bulk-delete 評估後不做）：紀錄沒有匯入批次識別，合併過的紀錄也回不到合併前的樣子，要改 schema 與備份格式。目前用「搜尋 → 全選目前結果 → 刪除」代替。觸發點：搜尋加全選圈不出某次匯入的範圍
+- 紀錄頁沒有依月份或來源篩選（bulk-delete 不做）：多選刪除只能靠搜尋店家、品項、類別圈範圍。觸發點：要刪某個月或所有載具紀錄時，搜尋加全選不夠用
+- 刪紀錄不倒回規則的 `hitCount`／`lastHitAt`（bulk-delete 決定不做）：刪測試資料後設定頁的「命中 N 次」會偏高；`hitCount` 只用於顯示，不影響分類排序（`matching.ts`）。要倒回得記錄每次命中來源。觸發點：使用者覺得命中次數誤導
 
 已評估、未採用：沒有總計額時用品項加總帶入金額（見 design.md §5.3 的觸發點）。
 

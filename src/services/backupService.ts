@@ -3,6 +3,7 @@ import type { StoragePort } from '@/storage'
 import { categoryNameMap, csvBlob, toCsv } from '@/backup/csv'
 import { backupFileName, csvFileName } from '@/backup/share'
 import { updateSettings } from '@/services/settingsService'
+import { deleteRecords } from '@/services/entryService'
 import {
   createBackup,
   readBackup,
@@ -103,4 +104,37 @@ export async function commitRestore(
   preview: RestorePreview,
 ): Promise<void> {
   await restoreBackup(storage, preview.parsed)
+}
+
+export interface BulkDeletePreview {
+  ids: string[]
+  count: number
+  total: number
+  photoCount: number
+  invoiceCount: number
+  /** 刪除前的當前資料，呼叫端必須先交給使用者再 commit。 */
+  safetyBackup: File
+}
+
+/** 批次刪除第一步：和還原一樣，保險備份在 API 上就是強制的。 */
+export async function prepareBulkDelete(
+  storage: StoragePort,
+  records: SpendRecord[],
+  now = new Date(),
+): Promise<BulkDeletePreview> {
+  const safetyBackup = await buildBackupFile(storage, now)
+  return {
+    ids: records.map((r) => r.id),
+    count: records.length,
+    total: records.reduce((s, r) => s + r.amount, 0),
+    // truthy 判斷和 deleteRecords 一致，文案與實刪才對得上
+    photoCount: records.filter((r) => !!r.photoId).length,
+    invoiceCount: records.filter((r) => !!r.invoiceKey).length,
+    safetyBackup,
+  }
+}
+
+/** 批次刪除第二步：呼叫前必須已把 safetyBackup 交給使用者。 */
+export function commitBulkDelete(storage: StoragePort, preview: BulkDeletePreview): Promise<number> {
+  return deleteRecords(storage, preview.ids)
 }

@@ -466,9 +466,21 @@ export function getPhoto(storage: StoragePort, id: string): Promise<Photo | unde
   return storage.get<Photo>('photos', id)
 }
 
-export async function deleteRecord(storage: StoragePort, record: SpendRecord): Promise<void> {
-  await storage.transaction(['records', 'photos'], async (tx) => {
-    await tx.delete('records', record.id)
-    if (record.photoId) await tx.delete('photos', record.photoId)
+/** 照片 id 讀 DB 當下的值：呼叫端的快照可能已過期，用它會刪到別筆的照片、留下孤兒照片。 */
+export async function deleteRecords(storage: StoragePort, ids: string[]): Promise<number> {
+  return storage.transaction(['records', 'photos'], async (tx) => {
+    let deleted = 0
+    for (const id of ids) {
+      const current = await tx.get<SpendRecord>('records', id)
+      if (!current) continue
+      await tx.delete('records', id)
+      if (current.photoId) await tx.delete('photos', current.photoId)
+      deleted++
+    }
+    return deleted
   })
+}
+
+export async function deleteRecord(storage: StoragePort, record: SpendRecord): Promise<void> {
+  await deleteRecords(storage, [record.id])
 }

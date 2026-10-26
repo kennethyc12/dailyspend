@@ -16,8 +16,10 @@ import { backupFileName, csvFileName, dateStamp } from '../share'
 import {
   buildBackupFile,
   buildCsvFile,
+  commitBulkDelete,
   commitRestore,
   markBackedUp,
+  prepareBulkDelete,
   prepareRestore,
   REMIND_AFTER_RECORDS,
   shouldRemindBackup,
@@ -358,6 +360,44 @@ describe('還原的兩步驟安全機制', () => {
       BackupFormatError,
     )
     expect(await storage.count('records')).toBe(1)
+  })
+})
+
+describe('批次刪除的兩步驟安全機制', () => {
+  async function setup() {
+    await seed(storage)
+    await storage.put('photos', photo('p1'))
+    const a = rec({ id: 'a', amount: 55, photoId: 'p1', invoiceKey: '11509-AB12345678' })
+    const b = rec({ id: 'b', amount: 120 })
+    const keep = rec({ id: 'keep', amount: 30 })
+    for (const r of [a, b, keep]) await saveRecord(storage, r)
+    return { a, b }
+  }
+
+  it('preview 的筆數、金額、照片數、發票數取自傳入的紀錄', async () => {
+    const { a, b } = await setup()
+    const preview = await prepareBulkDelete(storage, [a, b], new Date(NOW))
+    expect(preview).toMatchObject({ ids: ['a', 'b'], count: 2, total: 175, photoCount: 1, invoiceCount: 1 })
+  })
+
+  it('保險備份含有即將被刪掉的紀錄與照片', async () => {
+    const { a, b } = await setup()
+    const preview = await prepareBulkDelete(storage, [a, b], new Date(NOW))
+    expect(preview.safetyBackup.name).toMatch(/^dailyspend-backup-.*\.zip$/)
+    const safety = await readBackup(preview.safetyBackup)
+    expect(safety.data.records.map((r) => r.id).sort()).toEqual(['a', 'b', 'keep'])
+    expect(safety.photos.map((p) => p.id)).toEqual(['p1'])
+  })
+
+  it('prepareBulkDelete 不會改動資料，要 commit 才刪', async () => {
+    const { a, b } = await setup()
+    const preview = await prepareBulkDelete(storage, [a, b], new Date(NOW))
+    expect(await storage.count('records')).toBe(3)
+    expect(await storage.count('photos')).toBe(1)
+
+    expect(await commitBulkDelete(storage, preview)).toBe(2)
+    expect((await storage.getAll<SpendRecord>('records')).map((r) => r.id)).toEqual(['keep'])
+    expect(await storage.count('photos')).toBe(0)
   })
 })
 

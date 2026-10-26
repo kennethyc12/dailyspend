@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { IDBFactory } from 'fake-indexeddb'
-import type { RecordItem, Rule, SpendRecord } from '@/models/types'
+import type { Photo, RecordItem, Rule, SpendRecord } from '@/models/types'
 import { todayIso } from '@/parsing/quickInput'
 import { addDays } from '@/analysis/dates'
 import { IndexedDbAdapter, seed, StorageConflictError } from '@/storage'
@@ -11,6 +11,7 @@ import {
   correctCategory,
   createFromText,
   deleteRecord,
+  deleteRecords,
   getRecord,
   learnItemRule,
   resolvePending,
@@ -343,7 +344,66 @@ describe('確認與刪除', () => {
     expect(await storage.count('records')).toBe(0)
     expect(await storage.count('photos')).toBe(0)
   })
+
+  it('傳入的紀錄照片已過期時，刪的是 DB 當下的照片，不動別筆的照片', async () => {
+    await putPhoto('p1')
+    await putPhoto('p2')
+    const r1 = await textRecordWithPhoto('甲店 咖啡 55', 'p2')
+    const r2 = await textRecordWithPhoto('乙店 咖啡 60', 'p1')
+
+    await deleteRecord(storage, { ...r1, photoId: 'p1' })
+
+    expect((await storage.getAll<SpendRecord>('records')).map((r) => r.id)).toEqual([r2.id])
+    expect((await storage.getAll<Photo>('photos')).map((p) => p.id)).toEqual(['p1'])
+  })
 })
+
+describe('批次刪除紀錄', () => {
+  it('刪多筆會一併刪掉照片，其他紀錄與照片不動', async () => {
+    await putPhoto('p1')
+    await putPhoto('p2')
+    await putPhoto('p3')
+    const a = await textRecordWithPhoto('甲店 咖啡 55', 'p1')
+    const b = await textRecordWithPhoto('乙店 咖啡 60', 'p2')
+    const c = await textRecordWithPhoto('丙店 咖啡 70', 'p3')
+    await createFromText(storage, '丁店 咖啡 80', NOW)
+
+    expect(await deleteRecords(storage, [a.id, b.id])).toBe(2)
+
+    const left = await storage.getAll<SpendRecord>('records')
+    expect(left.map((r) => r.merchant).sort()).toEqual(['丁店', '丙店'])
+    expect(left.find((r) => r.id === c.id)?.photoId).toBe('p3')
+    expect((await storage.getAll<Photo>('photos')).map((p) => p.id)).toEqual(['p3'])
+  })
+
+  it('不存在的 id 跳過，回傳實際刪除的筆數', async () => {
+    await createFromText(storage, '甲店 咖啡 55', NOW)
+    const r = await only()
+
+    expect(await deleteRecords(storage, ['missing', r.id])).toBe(1)
+    expect(await storage.count('records')).toBe(0)
+  })
+})
+
+async function putPhoto(id: string) {
+  await storage.put('photos', {
+    id,
+    blob: new Blob(['x']),
+    thumbBlob: new Blob(['t']),
+    width: 1,
+    height: 1,
+    bytes: 1,
+    capturedAt: NOW,
+  })
+}
+
+async function textRecordWithPhoto(input: string, photoId: string): Promise<SpendRecord> {
+  const result = await createFromText(storage, input, NOW)
+  if (!result.ok) throw new Error(`建立失敗：${result.blocked}`)
+  const r = { ...result.save.record, photoId }
+  await storage.put('records', r)
+  return r
+}
 
 describe('編輯既有紀錄', () => {
   it('補上店家後 missing_merchant 解除', async () => {
