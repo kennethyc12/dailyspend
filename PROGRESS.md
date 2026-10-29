@@ -64,7 +64,7 @@
 | same-name-items | 編輯品項時同名品項各自保留數量、金額與分類 | ✅ | ✅ | 2026-10-23 真機驗收通過：載具匯入含同名品項的紀錄加一行品項後，兩個同名品項的數量與金額不變 |
 | entryservice-tz-test | 「昨天」前綴測試改用本地日期，台北清晨不再必紅 | ✅ | — | 只改測試，不需真機；`TZ=Asia/Taipei` 與 `TZ=UTC` 全套皆 625 passed |
 | bulk-delete | 紀錄頁多選刪除，刪除前強制存保險備份 | ✅ | ✅ | 2026-10-26 真機驗收通過：勾選與點整列、全選目前結果、底部列不被分頁列蓋住、確認區塊文案與捲動、iOS 分享保險備份與取消、刪除後回饋與紅點、用保險備份還原。「改搜尋關鍵字後勾選清空」用中文輸入法時勾勾似乎仍在，jsdom（含模擬組字）重現不出來，記 ticket 待重現 |
-| prepare-files | 備份頁匯入或還原後重組匯出檔失敗時，不再能匯出重組前的舊檔 | ✅ | ⏳ | 真機驗收：匯入後匯出 CSV 與完整備份成功、內容是匯入後的資料 |
+| prepare-files | 備份頁匯入或還原後重組匯出檔失敗時，不再能匯出重組前的舊檔 | ✅ | ✅ | 2026-10-29 真機驗收通過：進備份頁兩鈕可匯出、匯入載具 CSV 後匯出的 CSV 含匯入的紀錄、完整備份存檔成功且上次備份更新。組檔失敗的情境由頁面測試與突變 M1–M8 涵蓋 |
 
 ---
 
@@ -468,7 +468,7 @@ v1 的程式寫完了。接下來最有價值的不是寫功能，是**讓真實
 | **B8** ✅ | 文件同步：待確認原因 11 種、design.md §3.7／§4.4 補 `tokens_after_amount`；單價不加總的理由改成「沒有總計額時無法核對品項是否齊全」（FEATURES、註解、記一筆提示、測試名稱）；編碼與合規樣本現況；FEATURES〈數字〉表標統計日期、README 拿掉測試數；開發指令補 lint；清單外同類舊說法一併改（README:27、PROGRESS 現況段、QR 實驗室頁說明） | 〈數字〉表每批都會過時，已標統計日期與 commit；若之後每批都要更新，再考慮刪表 |
 | **same-name-items** ✅ | `computeRecordUpdate` 原本用品名建 Map 對回舊品項，同名品項全拿到最後一個的值；改用 `matchItems`（頭尾相同的依位置，中段同名的依舊順序，相鄰同名刪一個保留前面那個）；design.md:979 與 `RecordPatch.itemNames` 註解對齊實況 | **修正前編輯過同名品項的紀錄不會自動修復**；QR 品名頭尾空白、「同名保留 categoryId」與重分類不一致另記 ticket |
 | **bulk-delete** ✅ | 紀錄頁「選取」模式：逐筆勾選或全選目前搜尋結果，改關鍵字清空勾選；`prepareBulkDelete`／`commitBulkDelete` 讓保險備份在 API 上強制（同還原）；確認區塊列筆數、合計、照片數、發票數與規則不刪；`deleteRecords` 為唯一刪除點，讀 DB 當下的 `photoId`（單筆刪除一併修正快照過期時刪到別筆照片、留下孤兒照片） | 單筆刪除不強制保險備份；依匯入批次撤銷、依月份／來源篩選、`hitCount` 不倒回另記 ticket；merge-provenance、tombstone、規則清單多選刪除已評估、未採用（DECISIONS） |
-| **prepare-files** | `prepareFiles` 一開始重組就把 `csvFile`／`backupFile` 清成 `null`：組檔失敗的那個檔按鈕停用（原本匯出的是匯入或還原前的舊檔，還會 `markBackedUp`），zip 失敗時新 CSV 仍可匯出；失敗文案改「準備匯出檔失敗，請離開本頁再進來重試」；頁面測試以 `IDBObjectStore.prototype.getAll` 製造失敗 | 不加重試鈕；組檔與匯入／還原重疊另記 ticket |
+| **prepare-files** ✅ | `prepareFiles` 一開始重組就把 `csvFile`／`backupFile` 清成 `null`：組檔失敗的那個檔按鈕停用（原本匯出的是匯入或還原前的舊檔，還會 `markBackedUp`），zip 失敗時新 CSV 仍可匯出；失敗文案改「準備匯出檔失敗，請離開本頁再進來重試」；頁面測試以 `IDBObjectStore.prototype.getAll` 製造失敗 | 不加重試鈕；組檔與匯入／還原重疊另記 ticket |
 
 另外二十九張 ticket：
 - 返回分析頁時展開與捲動消失：從佐證清單點進一筆再「← 返回」，清單收合、可能回到頁首（沒有 `keep-alive`、`scrollBehavior`）。使用者 2026-10-17 決定接受。觸發點：真機回報看完一筆回來找不到原本那條
