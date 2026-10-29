@@ -64,6 +64,7 @@
 | same-name-items | 編輯品項時同名品項各自保留數量、金額與分類 | ✅ | ✅ | 2026-10-23 真機驗收通過：載具匯入含同名品項的紀錄加一行品項後，兩個同名品項的數量與金額不變 |
 | entryservice-tz-test | 「昨天」前綴測試改用本地日期，台北清晨不再必紅 | ✅ | — | 只改測試，不需真機；`TZ=Asia/Taipei` 與 `TZ=UTC` 全套皆 625 passed |
 | bulk-delete | 紀錄頁多選刪除，刪除前強制存保險備份 | ✅ | ✅ | 2026-10-26 真機驗收通過：勾選與點整列、全選目前結果、底部列不被分頁列蓋住、確認區塊文案與捲動、iOS 分享保險備份與取消、刪除後回饋與紅點、用保險備份還原。「改搜尋關鍵字後勾選清空」用中文輸入法時勾勾似乎仍在，jsdom（含模擬組字）重現不出來，記 ticket 待重現 |
+| prepare-files | 備份頁匯入或還原後重組匯出檔失敗時，不再能匯出重組前的舊檔 | ✅ | ⏳ | 真機驗收：匯入後匯出 CSV 與完整備份成功、內容是匯入後的資料 |
 
 ---
 
@@ -467,8 +468,9 @@ v1 的程式寫完了。接下來最有價值的不是寫功能，是**讓真實
 | **B8** ✅ | 文件同步：待確認原因 11 種、design.md §3.7／§4.4 補 `tokens_after_amount`；單價不加總的理由改成「沒有總計額時無法核對品項是否齊全」（FEATURES、註解、記一筆提示、測試名稱）；編碼與合規樣本現況；FEATURES〈數字〉表標統計日期、README 拿掉測試數；開發指令補 lint；清單外同類舊說法一併改（README:27、PROGRESS 現況段、QR 實驗室頁說明） | 〈數字〉表每批都會過時，已標統計日期與 commit；若之後每批都要更新，再考慮刪表 |
 | **same-name-items** ✅ | `computeRecordUpdate` 原本用品名建 Map 對回舊品項，同名品項全拿到最後一個的值；改用 `matchItems`（頭尾相同的依位置，中段同名的依舊順序，相鄰同名刪一個保留前面那個）；design.md:979 與 `RecordPatch.itemNames` 註解對齊實況 | **修正前編輯過同名品項的紀錄不會自動修復**；QR 品名頭尾空白、「同名保留 categoryId」與重分類不一致另記 ticket |
 | **bulk-delete** ✅ | 紀錄頁「選取」模式：逐筆勾選或全選目前搜尋結果，改關鍵字清空勾選；`prepareBulkDelete`／`commitBulkDelete` 讓保險備份在 API 上強制（同還原）；確認區塊列筆數、合計、照片數、發票數與規則不刪；`deleteRecords` 為唯一刪除點，讀 DB 當下的 `photoId`（單筆刪除一併修正快照過期時刪到別筆照片、留下孤兒照片） | 單筆刪除不強制保險備份；依匯入批次撤銷、依月份／來源篩選、`hitCount` 不倒回另記 ticket；merge-provenance、tombstone、規則清單多選刪除已評估、未採用（DECISIONS） |
+| **prepare-files** | `prepareFiles` 一開始重組就把 `csvFile`／`backupFile` 清成 `null`：組檔失敗的那個檔按鈕停用（原本匯出的是匯入或還原前的舊檔，還會 `markBackedUp`），zip 失敗時新 CSV 仍可匯出；失敗文案改「準備匯出檔失敗，請離開本頁再進來重試」；頁面測試以 `IDBObjectStore.prototype.getAll` 製造失敗 | 不加重試鈕；組檔與匯入／還原重疊另記 ticket |
 
-另外二十八張 ticket：
+另外二十九張 ticket：
 - 返回分析頁時展開與捲動消失：從佐證清單點進一筆再「← 返回」，清單收合、可能回到頁首（沒有 `keep-alive`、`scrollBehavior`）。使用者 2026-10-17 決定接受。觸發點：真機回報看完一筆回來找不到原本那條
 - `RecordEditView.test.ts`「略過逐項指定」在全套 `--sequence.shuffle` 下偶發失敗（chris 審 B6a 時 20 次紅 2 次；base `22e2cbf` 跑 6 次未重現，推測是既有時序問題，與 B6a 無關）。B6b 審閱時補充：單檔 30 seeds 紅 5 次，「逐項指定分類」也會紅，失敗的都排在檔內第 1～2 位，base `edb94f3` 同樣重現；推測是第一個測試冷啟動超過 `waitFor` 的 1000ms。觸發點：CI 或一般執行也紅
 - 設定頁照片壓縮的無效輸入靜默忽略：`updatePhotoSetting` 在 `value <= 0` 時直接 return、沒有提示，`quality` 大於 1 也接受（B6a 只做分析頁）。觸發點：真機改壞照片參數，或 9b-3 驗收時
@@ -486,7 +488,8 @@ v1 的程式寫完了。接下來最有價值的不是寫功能，是**讓真實
 - 「同名品項保留 categoryId」與重分類不一致：店家或品名一改、分類來源不是 `user` 時，`applyClassification` 依索引覆寫所有品項的 `categoryId`；保留只在 user 來源或待確認卡草稿（`reclassify: false`）時成立。觸發點：使用者回報改了品項後逐項分類被重設
 - 已有照片和發票時再選一張，取消或壓縮失敗會把發票資料清掉（`onPickPhoto` 一開始就 `clearInvoice()`）。P3，照片仍附著、文字路徑可用，不會存錯資料。觸發點：有人回報重選照片失敗後發票面板不見
 - QR 路徑不讀 `needsReclassify`：`createFromInvoice` 合併後品項變了也不會重跑分類（載具匯入已用 `applyClassification` 處理）。觸發點：QR 合併進既有紀錄後分類明顯錯誤
-- `prepareFiles()` 重組失敗時保留舊檔：只設 `errorMsg`，`csvFile`／`backupFile` 仍是舊的，匯出會拿到匯入或還原前的資料。修法：重組失敗時清掉舊檔或停用匯出。觸發點：使用者回報匯出的資料比畫面上舊
+- 組檔與匯入／還原重疊：`importLocked` 與還原選檔都不看 `preparing`，進備份頁那一輪組檔還沒結束就匯入或還原時，兩輪 `prepareFiles` 重疊；舊那一輪較晚結束會用匯入前的資料蓋掉新檔，並在 finally 把 `preparing` 改回 false（prepare-files 擋不住）。照片多、iPhone 組檔要好幾秒時才可能發生。觸發點：真機上匯入或還原後馬上匯出，拿到的是舊資料
+- 部分失敗後錯誤訊息被匯出清掉：備份頁重組時 zip 失敗、CSV 成功，使用者點「匯出 CSV」後 `exportCsv` 清掉 `errorMsg`，「完整備份」仍停用卻不再說明原因（prepare-files 不處理，使用者 2026-10-29 決定）。修法：組檔錯誤獨立成一個 ref，不被匯出動作清掉。觸發點：使用者回報完整備份鈕灰掉不知道為什麼
 - 「用發票資料存檔」沒有檢查儲存層是否初始化完成（文字的「存檔」有檢查 `state !== 'ready'`）。機率低，只記錄
 - 重跑時記憶體 settings 被蓋回：`runInit` 的 `settings.value = current` 在 `requestPersist` 之後才執行，這段期間在設定頁改了照片壓縮，記憶體裡的值會被蓋回舊的（DB 是對的）。觸發點：真機回報照片壓縮欄位跳回舊值
 - 備份頁不等初始化：`BackupView` 的 `onMounted(prepareFiles)` 不等 `initStorage`，首次安裝後直接冷啟動進 `/backup` 時，匯出檔可能在 seed 之前就組好。機率極低。觸發點：使用者回報第一次的匯出檔是空的

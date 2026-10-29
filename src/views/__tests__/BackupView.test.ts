@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { nextTick } from 'vue'
 import type { VueWrapper } from '@vue/test-utils'
+import { IDBObjectStore } from 'fake-indexeddb'
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate'
 import type { Settings, SpendRecord } from '@/models/types'
 import BackupView from '@/views/BackupView.vue'
@@ -13,6 +14,7 @@ import { initStorage, useStorageStatus } from '@/composables/useStorageStatus'
 import { pendingRecords, refreshRecords } from '@/composables/useRecords'
 import { todayIso } from '@/parsing/quickInput'
 import { saveFile } from '@/backup/share'
+import { clearErrors, useErrorLog } from '@/errors/errorLog'
 
 vi.mock('@/backup/share', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/backup/share')>()),
@@ -277,6 +279,115 @@ describe('載具 CSV 匯入', () => {
     await running
     await nextTick()
     expect(csvInput(wrapper).element.disabled).toBe(false)
+  })
+
+  describe('重組匯出檔失敗（prepare-files）', () => {
+    /** 讓某個 store 的 getAll 丟錯；times 次之後恢復正常。 */
+    function failGetAll(store: string, times = Infinity) {
+      const real = IDBObjectStore.prototype.getAll
+      let left = times
+      return vi.spyOn(IDBObjectStore.prototype, 'getAll').mockImplementation(function (
+        this: IDBObjectStore,
+        ...args: Parameters<IDBObjectStore['getAll']>
+      ) {
+        if (this.name === store && left-- > 0) throw new DOMException('boom', 'UnknownError')
+        return real.apply(this, args)
+      })
+    }
+
+    function expectPrepareError() {
+      expect(useErrorLog().errors.value.map((e) => e.where)).toEqual(['BackupView.prepareFiles'])
+    }
+
+    const lastSaved = () => vi.mocked(saveFile).mock.calls.at(-1)![0]
+    const disabled = (w: VueWrapper, text: string) => button(w, text).attributes('disabled') !== undefined
+
+    // 中途 expect 失敗也要清掉，否則 useViewTest 的 afterEach 會再報一次「錯誤被吞」。
+    afterEach(() => {
+      vi.restoreAllMocks()
+      clearErrors()
+    })
+
+    it('還原後組 zip 失敗 → 完整備份停用，CSV 是還原後的新檔', async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => {})
+      await createFromText(storage(), '某店 55')
+      const zip = await backupZip()
+      const wrapper = await mountView(BackupView, '/backup')
+      await waitForText(wrapper, '完整備份（zip）')
+      await button(wrapper, '匯出 CSV').trigger('click')
+      await waitForText(wrapper, 'CSV已下載')
+      const before = lastSaved()
+
+      await pickFile(zipInput(wrapper), zip)
+      await waitForText(wrapper, '② 確認覆寫並還原')
+      await button(wrapper, '① 先存下目前資料的保險備份').trigger('click')
+      await waitForText(wrapper, '已存下保險備份')
+      // prepareRestore 也會組 zip（保險備份），所以等它做完才裝
+      const spy = failGetAll('photos')
+      await button(wrapper, '② 確認覆寫並還原').trigger('click')
+      await waitForText(wrapper, '還原完成')
+      spy.mockRestore()
+
+      expect(disabled(wrapper, '完整備份（zip）')).toBe(true)
+      expect(disabled(wrapper, '匯出 CSV')).toBe(false)
+      // 匯出會清掉錯誤訊息，所以先看文案
+      expect(wrapper.text()).toContain('準備匯出檔失敗，請離開本頁再進來重試')
+      await button(wrapper, '匯出 CSV').trigger('click')
+      expect(lastSaved()).not.toBe(before)
+      expectPrepareError()
+    })
+
+    it('匯入後組 zip 失敗 → 完整備份停用，CSV 是匯入後的新檔', async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => {})
+      const wrapper = await previewOf([{ total: '55' }])
+      await waitForText(wrapper, '完整備份（zip）')
+      await button(wrapper, '匯出 CSV').trigger('click')
+      await waitForText(wrapper, 'CSV已下載')
+      const before = lastSaved()
+
+      const spy = failGetAll('photos')
+      // 「匯入完成」與錯誤訊息會同時顯示：兩句都是事實
+      await confirm(wrapper)
+      spy.mockRestore()
+
+      expect(disabled(wrapper, '完整備份（zip）')).toBe(true)
+      expect(disabled(wrapper, '匯出 CSV')).toBe(false)
+      // 匯出會清掉錯誤訊息，所以先看文案
+      expect(wrapper.text()).toContain('準備匯出檔失敗，請離開本頁再進來重試')
+      await button(wrapper, '匯出 CSV').trigger('click')
+      expect(lastSaved()).not.toBe(before)
+      expectPrepareError()
+    })
+
+    it('匯入後組 CSV 失敗 → 兩個匯出鈕都停用', async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => {})
+      const wrapper = await previewOf([{ total: '55' }])
+      await waitForText(wrapper, '完整備份（zip）')
+      expect(disabled(wrapper, '匯出 CSV')).toBe(false)
+      expect(disabled(wrapper, '完整備份（zip）')).toBe(false)
+
+      // commit 也會 getAll('records')，要等它過去：讓 initStorage 停在 estimate，
+      // 之後第一個 getAll('records') 就是 buildCsvFile。
+      const est = deferred<StorageEstimate>()
+      const estimate = vi.fn(() => est.promise)
+      Object.defineProperty(navigator, 'storage', { configurable: true, value: { estimate } })
+      try {
+        await button(wrapper, '確認匯入').trigger('click')
+        await vi.waitFor(() => expect(estimate).toHaveBeenCalledTimes(1))
+        const spy = failGetAll('records', 1)
+        est.resolve({ usage: 0, quota: 0 })
+        await waitForText(wrapper, '匯入完成')
+        spy.mockRestore()
+      } finally {
+        est.resolve({ usage: 0, quota: 0 })
+        delete (navigator as { storage?: StorageManager }).storage
+      }
+
+      expect(disabled(wrapper, '匯出 CSV')).toBe(true)
+      expect(disabled(wrapper, '完整備份（zip）')).toBe(true)
+      expect(wrapper.text()).toContain('準備匯出檔失敗，請離開本頁再進來重試')
+      expectPrepareError()
+    })
   })
 
   // 要讓 commit 之後的 refreshRecords 失敗只能 spy 自己的 adapter，違反「自己寫的程式真實執行」。

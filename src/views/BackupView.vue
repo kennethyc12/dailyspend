@@ -115,11 +115,18 @@ const lastBackupText = computed(() => {
 
 async function prepareFiles() {
   preparing.value = true
+  // 舊檔是重組前的資料：失敗時若還能匯出，使用者會拿到舊備份，還被記成已備份。
+  // 不在 catch 才清，zip 失敗時已組好的新 CSV 仍可匯出。
+  csvFile.value = null
+  backupFile.value = null
   try {
     csvFile.value = await buildCsvFile(storage)
     backupFile.value = await buildBackupFile(storage)
   } catch (err) {
-    errorMsg.value = handleError(err, { where: 'BackupView.prepareFiles', failed: '準備檔案失敗' })
+    errorMsg.value = handleError(err, {
+      where: 'BackupView.prepareFiles',
+      failed: '準備匯出檔失敗，請離開本頁再進來重試',
+    })
   } finally {
     preparing.value = false
   }
