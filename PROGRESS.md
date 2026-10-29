@@ -65,6 +65,7 @@
 | entryservice-tz-test | 「昨天」前綴測試改用本地日期，台北清晨不再必紅 | ✅ | — | 只改測試，不需真機；`TZ=Asia/Taipei` 與 `TZ=UTC` 全套皆 625 passed |
 | bulk-delete | 紀錄頁多選刪除，刪除前強制存保險備份 | ✅ | ✅ | 2026-10-26 真機驗收通過：勾選與點整列、全選目前結果、底部列不被分頁列蓋住、確認區塊文案與捲動、iOS 分享保險備份與取消、刪除後回饋與紅點、用保險備份還原。「改搜尋關鍵字後勾選清空」用中文輸入法時勾勾似乎仍在，jsdom（含模擬組字）重現不出來，記 ticket 待重現 |
 | prepare-files | 備份頁匯入或還原後重組匯出檔失敗時，不再能匯出重組前的舊檔 | ✅ | ✅ | 2026-10-29 真機驗收通過：進備份頁兩鈕可匯出、匯入載具 CSV 後匯出的 CSV 含匯入的紀錄、完整備份存檔成功且上次備份更新。組檔失敗的情境由頁面測試與突變 M1–M8 涵蓋 |
+| record-edit-categories | 直接開啟編輯頁（例如在編輯頁按「有新版本 → 更新」）時，類別選單是空的、目前類別顯示 id | ✅ | ⏳ | 真機驗收：停在編輯頁按「有新版本 → 更新」後類別正常、可改分類 |
 
 ---
 
@@ -469,12 +470,11 @@ v1 的程式寫完了。接下來最有價值的不是寫功能，是**讓真實
 | **same-name-items** ✅ | `computeRecordUpdate` 原本用品名建 Map 對回舊品項，同名品項全拿到最後一個的值；改用 `matchItems`（頭尾相同的依位置，中段同名的依舊順序，相鄰同名刪一個保留前面那個）；design.md:979 與 `RecordPatch.itemNames` 註解對齊實況 | **修正前編輯過同名品項的紀錄不會自動修復**；QR 品名頭尾空白、「同名保留 categoryId」與重分類不一致另記 ticket |
 | **bulk-delete** ✅ | 紀錄頁「選取」模式：逐筆勾選或全選目前搜尋結果，改關鍵字清空勾選；`prepareBulkDelete`／`commitBulkDelete` 讓保險備份在 API 上強制（同還原）；確認區塊列筆數、合計、照片數、發票數與規則不刪；`deleteRecords` 為唯一刪除點，讀 DB 當下的 `photoId`（單筆刪除一併修正快照過期時刪到別筆照片、留下孤兒照片） | 單筆刪除不強制保險備份；依匯入批次撤銷、依月份／來源篩選、`hitCount` 不倒回另記 ticket；merge-provenance、tombstone、規則清單多選刪除已評估、未採用（DECISIONS） |
 | **prepare-files** ✅ | `prepareFiles` 一開始重組就把 `csvFile`／`backupFile` 清成 `null`：組檔失敗的那個檔按鈕停用（原本匯出的是匯入或還原前的舊檔，還會 `markBackedUp`），zip 失敗時新 CSV 仍可匯出；失敗文案改「準備匯出檔失敗，請離開本頁再進來重試」；頁面測試以 `IDBObjectStore.prototype.getAll` 製造失敗 | 不加重試鈕；組檔與匯入／還原重疊另記 ticket |
+| **record-edit-categories** | 編輯頁 `onMounted` 先 `refreshRecords()` 再讀紀錄：類別清單是 `useRecords` 的模組單例，其他會顯示紀錄或類別的頁進來都會載入，只有編輯頁要等第一次 `act()`，所以更新 App 後重新載入落在 `#/records/:id` 時類別選單是空的、「目前：」顯示 id；refresh 在 try 內，失敗時整頁「讀取失敗」不顯示半套資料。原 flake ticket（`RecordEditView.test.ts` 在 shuffle 下偶發失敗）同一成因：原推測「第一個測試冷啟動超過 1000ms」**已推翻**，真因是排在任何 `act()` 之前的測試拿不到類別。新增「直接開啟」與「類別讀取失敗」頁面測試；「改整筆分類」補斷言類別確實改變（使用者同意）；`otherOption` 找不到選項時說明原因 | 編輯頁多讀一次全部 records（同其他頁）；`act()` 寫入成功但重新整理失敗另記 ticket |
 
-另外二十九張 ticket：
+另外二十八張 ticket：
 - 返回分析頁時展開與捲動消失：從佐證清單點進一筆再「← 返回」，清單收合、可能回到頁首（沒有 `keep-alive`、`scrollBehavior`）。使用者 2026-10-17 決定接受。觸發點：真機回報看完一筆回來找不到原本那條
-- `RecordEditView.test.ts`「略過逐項指定」在全套 `--sequence.shuffle` 下偶發失敗（chris 審 B6a 時 20 次紅 2 次；base `22e2cbf` 跑 6 次未重現，推測是既有時序問題，與 B6a 無關）。B6b 審閱時補充：單檔 30 seeds 紅 5 次，「逐項指定分類」也會紅，失敗的都排在檔內第 1～2 位，base `edb94f3` 同樣重現；推測是第一個測試冷啟動超過 `waitFor` 的 1000ms。觸發點：CI 或一般執行也紅
 - 設定頁照片壓縮的無效輸入靜默忽略：`updatePhotoSetting` 在 `value <= 0` 時直接 return、沒有提示，`quality` 大於 1 也接受（B6a 只做分析頁）。觸發點：真機改壞照片參數，或 9b-3 驗收時
-- jsdom 的 `DOMException` 不是 `Error` 子類，錯誤紀錄的 message 會記成 `{}`（測試因此只斷言 where 與筆數）。推測真機不會（WebIDL 規定原型是 `Error.prototype`）。觸發點：真機錯誤紀錄出現 `{}`
 - 記一筆讀 QR 時 `detectQrCodes` 回 `error`（例如 wasm 載入失敗）：畫面顯示原文、不進錯誤紀錄，「讀取發票失敗」字樣在 `onPickPhoto` 寫了兩次（結果分支與 catch）。觸發點：有人遇到 wasm 載入失敗，或 QrLab 下架時（`detectQrCodes` 兩頁共用，正確修法要改它的回傳；使用者 2026-10-16 決定，2026-10-18 改觸發點）
 - 待確認卡的死角：多品項卡改日期撞到另一張發票的 `invoiceKey`，按「確認並記住規則」展開逐項面板後「完成並確認」會失敗；面板開著時「修改」「放棄修改」停用（避免逐項草稿錯位），卡片上改不回日期，只能離開頁面（草稿全消失）或刪除。使用者 2026-10-15 決定接受。觸發點：有人真的遇到，或要讓逐項面板可以收起時
 - `SettingsView.vue`、`QrLabView.vue` 的 `loadSamples` 在頁面卸載後才 resolve 時，建出的縮圖 object URL 不會被 revoke（小洩漏）。觸發點：QrLab 下架或設定頁樣本區改版時（`useThumbnails` 以 photoId 從 DB 讀縮圖，樣本已帶 `thumbBlob`，不適合硬套）
@@ -490,6 +490,7 @@ v1 的程式寫完了。接下來最有價值的不是寫功能，是**讓真實
 - QR 路徑不讀 `needsReclassify`：`createFromInvoice` 合併後品項變了也不會重跑分類（載具匯入已用 `applyClassification` 處理）。觸發點：QR 合併進既有紀錄後分類明顯錯誤
 - 組檔與匯入／還原重疊：`importLocked` 與還原選檔都不看 `preparing`，進備份頁那一輪組檔還沒結束就匯入或還原時，兩輪 `prepareFiles` 重疊；舊那一輪較晚結束會用匯入前的資料蓋掉新檔，並在 finally 把 `preparing` 改回 false（prepare-files 擋不住）。照片多、iPhone 組檔要好幾秒時才可能發生。觸發點：真機上匯入或還原後馬上匯出，拿到的是舊資料
 - 部分失敗後錯誤訊息被匯出清掉：備份頁重組時 zip 失敗、CSV 成功，使用者點「匯出 CSV」後 `exportCsv` 清掉 `errorMsg`，「完整備份」仍停用卻不再說明原因（prepare-files 不處理，使用者 2026-10-29 決定）。修法：組檔錯誤獨立成一個 ref，不被匯出動作清掉。觸發點：使用者回報完整備份鈕灰掉不知道為什麼
+- 寫入成功但重新整理失敗，訊息說成失敗：編輯頁 `act()` 在寫入後 `refreshRecords()`，它失敗時走同一個 catch 顯示「操作失敗」，資料其實已寫入；備份頁匯入的同類情況見 `BackupView.test.ts` 的 `it.todo`（現在可以用 `IDBObjectStore.prototype.getAll` 製造失敗）。觸發點：使用者回報顯示失敗但資料其實改了
 - 「用發票資料存檔」沒有檢查儲存層是否初始化完成（文字的「存檔」有檢查 `state !== 'ready'`）。機率低，只記錄
 - 重跑時記憶體 settings 被蓋回：`runInit` 的 `settings.value = current` 在 `requestPersist` 之後才執行，這段期間在設定頁改了照片壓縮，記憶體裡的值會被蓋回舊的（DB 是對的）。觸發點：真機回報照片壓縮欄位跳回舊值
 - 備份頁不等初始化：`BackupView` 的 `onMounted(prepareFiles)` 不等 `initStorage`，首次安裝後直接冷啟動進 `/backup` 時，匯出檔可能在 seed 之前就組好。機率極低。觸發點：使用者回報第一次的匯出檔是空的
@@ -583,3 +584,7 @@ push 到 `main` 會自動跑 CI（lint → test → build → deploy）。
 
 11. **熱感紙列印品質差的發票讀不到**：白巷子那張的左方 QR 定位方塊太細、模組斷線，
     zxing 與 iPhone 內建相機都讀不出來。不處理；9b-3 樣本中讀不到的超過一張再評估。
+
+12. **`useRecords` 是模組單例**：紀錄與類別存在模組層的 `shallowRef`，只有 `refreshRecords()` 會填，頁面進來要自己呼叫，不能假設別頁載入過（record-edit-categories）。頁面測試之間也不會重設，測試結果會依賴執行順序；要模擬「沒載入過」就在該條 it 內清 `useRecords().categories.value`。
+
+13. **jsdom 的 `DOMException` 不是 `Error` 子類**：錯誤紀錄的 message 會記成 `{}`（測試因此只斷言 where 與筆數）。推測真機不會（WebIDL 規定原型是 `Error.prototype`）。觸發點：真機錯誤紀錄出現 `{}`（原 ticket，2026-10-29 移到這裡）

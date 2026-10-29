@@ -55,6 +55,8 @@ function applyRecord(r: SpendRecord) {
 onMounted(async () => {
   await initStorage()
   try {
+    // 類別清單是模組單例，只有 refreshRecords 會填；更新 App 後重新載入會直接落在這頁
+    await refreshRecords()
     const r = await getRecord(storage, String(route.params.id))
     if (!r) {
       errorMsg.value = '找不到這筆紀錄'

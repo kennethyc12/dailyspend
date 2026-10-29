@@ -390,7 +390,7 @@ describe('載具 CSV 匯入', () => {
     })
   })
 
-  // 要讓 commit 之後的 refreshRecords 失敗只能 spy 自己的 adapter，違反「自己寫的程式真實執行」。
+  // 可以用 IDBObjectStore.prototype.getAll 製造失敗（prepare-files 前例）；待做，見 PROGRESS ticket「寫入成功但重新整理失敗」。
   it.todo('commit 成功但重新整理失敗 → 不說「資料未變更」')
   // prepare 在 iPhone 上要好幾秒，但測試裡抓不穩它執行中的時間點。
   it.todo('匯入預覽計算中 → 還原選檔停用')

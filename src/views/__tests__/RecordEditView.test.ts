@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import type { DOMWrapper, VueWrapper } from '@vue/test-utils'
+import { IDBObjectStore } from 'fake-indexeddb'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { SpendRecord } from '@/models/types'
+import type { Category, SpendRecord } from '@/models/types'
 import RecordEditView from '@/views/RecordEditView.vue'
 import { createFromText } from '@/services/entryService'
 import { prepareRecord } from '@/services/recordService'
@@ -23,6 +24,7 @@ import {
 } from '@/test/mountView'
 import { clearErrors, useErrorLog } from '@/errors/errorLog'
 import { router } from '@/router'
+import { useRecords } from '@/composables/useRecords'
 
 vi.mock('@/photo/compress', () => ({
   compressPhoto: vi.fn(),
@@ -56,10 +58,13 @@ async function invoiceRecord(): Promise<SpendRecord> {
 }
 
 function otherOption(select: DOMWrapper<Element>, current: string | null): string {
-  return select
+  const value = select
     .findAll('option')
     .map((o) => o.attributes('value') ?? '')
-    .find((v) => v !== '' && v !== current)!
+    .find((v) => v !== '' && v !== current)
+  // 沒有這個檢查時，類別沒載入會表現成 waitFor 逾時，被誤判成時序問題
+  if (value === undefined) throw new Error('選單沒有其他類別可選（類別清單沒載入？）')
+  return value
 }
 
 /** 修好之前按鈕會變成「沒有變更」，用文字找會先丟「找不到元素」，所以用位置找欄位區塊的儲存鈕。 */
@@ -218,11 +223,15 @@ describe('編輯紀錄：其他動作不會蓋掉還沒存的修改（#3）', ()
 
     await field(wrapper, '金額').setValue('99')
     const select = field(wrapper, '類別')
-    await select.setValue(otherOption(select, before.categoryId))
+    const picked = otherOption(select, before.categoryId)
+    await select.setValue(picked)
     await settled(wrapper)
     await saveForm(wrapper)
 
-    expect(await amountOf(before.id)).toBe(99)
+    const after = await storage().get<SpendRecord>('records', before.id)
+    expect(after!.categoryId).toBe(picked)
+    expect(after!.categorySource).toBe('user')
+    expect(after!.amount).toBe(99)
   })
 
   async function openPerItem(): Promise<{ wrapper: VueWrapper; id: string }> {
@@ -292,6 +301,46 @@ describe('編輯紀錄：其他動作不會蓋掉還沒存的修改（#3）', ()
     const after = await storage().get<SpendRecord>('records', id)
     expect(after!.photoId).toBeNull()
     expect(after!.amount).toBe(99)
+  })
+})
+
+describe('直接開啟編輯頁（record-edit-categories）', () => {
+  it('沒有其他頁先載入類別 → 目前顯示類別名稱，選單有類別可選', async () => {
+    const before = await textRecord('全家 咖啡 55')
+    expect(before.categoryId).not.toBeNull()
+    const name = (await storage().getAll<Category>('categories')).find(
+      (c) => c.id === before.categoryId,
+    )!.name
+    // 模擬重新載入：模組單例裡的類別是空的
+    useRecords().categories.value = []
+
+    const wrapper = await openEditor(before.id)
+
+    expect(wrapper.text()).toContain(`目前：${name}（`)
+    expect(field(wrapper, '類別').findAll('option').length).toBeGreaterThan(1)
+  })
+
+  it('類別讀取失敗 → 顯示讀取失敗，不顯示半套的紀錄', async () => {
+    const before = await textRecord('全家 咖啡 55')
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const real = IDBObjectStore.prototype.getAll
+    const spy = vi.spyOn(IDBObjectStore.prototype, 'getAll').mockImplementation(function (
+      this: IDBObjectStore,
+      ...args: Parameters<IDBObjectStore['getAll']>
+    ) {
+      if (this.name === 'categories') throw new DOMException('boom', 'UnknownError')
+      return real.apply(this, args)
+    })
+    try {
+      const wrapper = await mountView(RecordEditView, `/records/${before.id}`)
+      await waitForText(wrapper, '讀取失敗')
+      expect(wrapper.find('select').exists()).toBe(false)
+      expect(useErrorLog().errors.value.map((e) => e.where)).toEqual(['RecordEditView.load'])
+    } finally {
+      spy.mockRestore()
+      vi.mocked(console.error).mockRestore()
+      clearErrors()
+    }
   })
 })
 
