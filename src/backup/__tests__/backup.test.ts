@@ -4,6 +4,10 @@ import type { Photo, Settings, SpendRecord } from '@/models/types'
 import { IndexedDbAdapter, seed } from '@/storage'
 import { seedBuiltinRules } from '@/services/ruleService'
 import { saveRecord } from '@/services/recordService'
+import { createFromText } from '@/services/entryService'
+import { parseCarrierCsv } from '@/parsing/carrierCsv'
+import { commitCarrierImport, prepareCarrierImport } from '@/services/carrierImportService'
+import { carrierCsv } from '@/test/fixtures'
 import {
   BACKUP_FORMAT_VERSION,
   BackupFormatError,
@@ -120,6 +124,49 @@ describe('CSV', () => {
     expect(csv).toContain('""讚""')
     // 跳脫後換行被包在引號內，整份不會多出一列資料。
     expect(csv.split('\r\n').filter((l) => l.startsWith('2026-10-05'))).toHaveLength(1)
+  })
+
+  describe('公式前綴（hardening）', () => {
+    const cellsOf = (csv: string) => csv.split('\r\n')[1]!
+
+    it.each(['=1+1', '+1', '-1', '@SUM(A1)', '\t=1', '\r=1'])('店家以 %j 開頭 → 該格以 \' 開頭', (merchant) => {
+      const row = cellsOf(toCsv([rec({ merchant })]))
+      expect(row.split(',')[1]!.replace(/^"/, '')).toMatch(/^'/)
+    })
+
+    it('第一個品項以 = 開頭 → 整格加前綴；後面的品項不看', () => {
+      expect(cellsOf(toCsv([rec({ items: [{ name: '=1', qty: 1, unitPrice: null, amount: null, categoryId: null }] })])).split(',')[2]).toBe("'=1")
+      const later = rec({
+        items: [
+          { name: '咖啡', qty: 1, unitPrice: null, amount: null, categoryId: null },
+          { name: '=1', qty: 1, unitPrice: null, amount: null, categoryId: null },
+        ],
+      })
+      expect(cellsOf(toCsv([later])).split(',')[2]).toBe('咖啡;=1')
+    })
+
+    it('備註與類別名稱也加前綴', () => {
+      const row = cellsOf(toCsv([rec({ note: '@note' })], { categoryNames: new Map([['drink', '=飲料']]) }))
+      const cells = row.split(',')
+      expect(cells[4]).toBe("'=飲料")
+      expect(cells[9]).toBe("'@note")
+    })
+
+    it('手改備份帶進來的 status、categorySource 也加前綴', () => {
+      const cells = cellsOf(
+        toCsv([rec({ status: '=cmd' as SpendRecord['status'], categorySource: '+x' as SpendRecord['categorySource'] })]),
+      ).split(',')
+      expect(cells[5]).toBe("'+x")
+      expect(cells[7]).toBe("'=cmd")
+    })
+
+    it('同時要引號與前綴：前綴在引號內', () => {
+      expect(cellsOf(toCsv([rec({ merchant: '=a,b' })]))).toContain(`"'=a,b"`)
+    })
+
+    it.each(['店-家', '7-11'])('%s 不在開頭的符號不加前綴', (merchant) => {
+      expect(cellsOf(toCsv([rec({ merchant })])).split(',')[1]).toBe(merchant)
+    })
   })
 
   it('加上 BOM，Excel 才不會把中文開成亂碼', async () => {
@@ -276,6 +323,142 @@ describe('備份檔驗證', () => {
     await expect(readBackup(broken)).rejects.toThrow('settings 格式錯誤')
   })
 
+  describe('逐筆驗證內容（hardening）', () => {
+    type Data = { records: Record<string, unknown>[]; rules: Record<string, unknown>[]; categories: Record<string, unknown>[]; photos: unknown[] }
+
+    /** 三筆正常紀錄的備份，壞資料一律放在非第一筆，才抓得到「只驗第一筆」與筆號算錯。 */
+    async function threeRecords(patch: (d: Data) => void): Promise<Blob> {
+      await seed(storage)
+      await seedBuiltinRules(storage)
+      for (const id of ['r1', 'r2', 'r3']) await saveRecord(storage, rec({ id }))
+      return backupWithData((d) => patch(d as unknown as Data))
+    }
+
+    const third = (d: Data) => d.records.find((r) => r.id === 'r3')!
+
+    it('第 3 筆紀錄缺 merchant → 指出第幾筆、哪個欄位', async () => {
+      const broken = await threeRecords((d) => delete third(d).merchant)
+      await expect(readBackup(broken)).rejects.toThrow('第 3 筆紀錄的 merchant')
+    })
+
+    it.each([
+      ['字串', '55', '第 3 筆紀錄的 amount'],
+      ['小數', 55.5, '第 3 筆紀錄的 amount'],
+      ['負數', -1, '第 3 筆紀錄的金額是負數'],
+    ])('金額是%s → 指出第 3 筆', async (_label, amount, message) => {
+      const broken = await threeRecords((d) => (third(d).amount = amount))
+      await expect(readBackup(broken)).rejects.toThrow(message)
+    })
+
+    it.each(['id', 'date', 'categorySource', 'status', 'pendingReasons', 'invoiceNumber', 'invoicePeriod', 'invoiceKey', 'note'])(
+      '紀錄缺 %s → 指出第 3 筆與欄位',
+      async (key) => {
+        const broken = await threeRecords((d) => delete third(d)[key])
+        await expect(readBackup(broken)).rejects.toThrow(`第 3 筆紀錄的 ${key}`)
+      },
+    )
+
+    it('品項不是物件 → 指出品項位置', async () => {
+      const broken = await threeRecords((d) => (third(d).items = [{ name: '咖啡', qty: 1 }, '洗髮精']))
+      await expect(readBackup(broken)).rejects.toThrow('第 3 筆紀錄的第 2 個品項不是物件')
+    })
+
+    it.each(['id', 'categoryId', 'priority', 'hitCount'])('第 2 條規則缺 %s → BackupFormatError', async (key) => {
+      const broken = await threeRecords((d) => delete d.rules[1]![key])
+      await expect(readBackup(broken)).rejects.toThrow(`第 2 筆規則的 ${key}`)
+    })
+
+    it('第 2 個類別缺 id → BackupFormatError', async () => {
+      const broken = await threeRecords((d) => delete d.categories[1]!.id)
+      await expect(readBackup(broken)).rejects.toThrow('第 2 筆類別的 id')
+    })
+
+    it('日期不存在 → BackupFormatError', async () => {
+      const broken = await threeRecords((d) => (third(d).date = '2026-02-30'))
+      await expect(readBackup(broken)).rejects.toThrow('第 3 筆紀錄的日期不存在')
+    })
+
+    it('items 不是陣列 → BackupFormatError', async () => {
+      const broken = await threeRecords((d) => (third(d).items = { name: '咖啡' }))
+      await expect(readBackup(broken)).rejects.toThrow('第 3 筆紀錄的 items')
+    })
+
+    it('第 2 個品項缺 name → 指出品項位置', async () => {
+      const broken = await threeRecords((d) => {
+        third(d).items = [{ name: '咖啡', qty: 1 }, { qty: 1 }]
+      })
+      await expect(readBackup(broken)).rejects.toThrow('第 3 筆紀錄的第 2 個品項的 name')
+    })
+
+    it('categoryId 缺鍵 → BackupFormatError（undefined 會被分析當成有類別）', async () => {
+      const broken = await threeRecords((d) => delete third(d).categoryId)
+      await expect(readBackup(broken)).rejects.toThrow('第 3 筆紀錄的 categoryId')
+    })
+
+    it('classifyConfidence 缺 → BackupFormatError（還原後匯出 CSV 才會炸）', async () => {
+      const broken = await threeRecords((d) => delete third(d).classifyConfidence)
+      await expect(readBackup(broken)).rejects.toThrow('第 3 筆紀錄的 classifyConfidence')
+    })
+
+    it.each([
+      ['有去重鍵、沒有號碼', { invoiceNumber: null, invoicePeriod: '11509', invoiceKey: '11509-AB12345678' }],
+      ['有號碼、沒有去重鍵', { invoiceNumber: 'AB12345678', invoicePeriod: '11509', invoiceKey: null }],
+      ['年期和日期對不上', { invoiceNumber: 'AB12345678', invoicePeriod: '11507', invoiceKey: '11509-AB12345678' }],
+    ])('%s → BackupFormatError', async (_label, fields) => {
+      const broken = await threeRecords((d) => Object.assign(third(d), fields))
+      await expect(readBackup(broken)).rejects.toThrow('第 3 筆紀錄的發票去重鍵')
+    })
+
+    it('第 2 條規則缺 pattern → BackupFormatError', async () => {
+      const broken = await threeRecords((d) => delete d.rules[1]!.pattern)
+      await expect(readBackup(broken)).rejects.toThrow('第 2 筆規則的 pattern')
+    })
+
+    it('第 2 個類別缺 name → BackupFormatError', async () => {
+      const broken = await threeRecords((d) => delete d.categories[1]!.name)
+      await expect(readBackup(broken)).rejects.toThrow('第 2 筆類別的 name')
+    })
+
+    it('照片清單裡有 null → BackupFormatError', async () => {
+      const broken = await threeRecords((d) => d.photos.push(null))
+      await expect(readBackup(broken)).rejects.toThrow('第 1 筆照片不是物件')
+    })
+
+    it.each([
+      ['是 null', 'null'],
+      ['缺 formatVersion', JSON.stringify({ createdAt: NOW, counts: {} })],
+    ])('manifest %s → BackupFormatError', async (_label, manifest) => {
+      const { unzipSync, zipSync, strToU8 } = await import('fflate')
+      await seed(storage)
+      const entries = unzipSync(new Uint8Array(await (await createBackup(storage, NOW)).arrayBuffer()))
+      entries['manifest.json'] = strToU8(manifest)
+      await expect(readBackup(new Blob([zipSync(entries) as BlobPart]))).rejects.toThrow('manifest.json 格式錯誤')
+    })
+
+    it('App 自己產生的備份一定通過：手輸、載具（負數小計、小數個數）、帶照片、舊式紀錄', async () => {
+      await seed(storage)
+      await seedBuiltinRules(storage)
+      const typed = await createFromText(storage, '全家 咖啡 55')
+      expect(typed.ok).toBe(true)
+      const parsed = parseCarrierCsv(
+        carrierCsv([
+          { number: 'AB12345678', time: '2026/10/05 12:00:00', item: '汽油', qty: '36.27000000000000512', subtotal: '1100', total: '1010' },
+          { number: 'AB12345678', time: '2026/10/05 12:00:00', item: '會員回饋金', qty: '1', subtotal: '-90' },
+        ]),
+      )
+      if (!parsed.ok) throw new Error('fixture 解析失敗')
+      await commitCarrierImport(storage, await prepareCarrierImport(storage, parsed), new Map())
+      await saveRecord(storage, rec({ id: 'with-photo', photoId: 'p1' }), { photo: photo('p1') })
+      const legacy = rec({ id: 'legacy' })
+      delete (legacy as Partial<SpendRecord>).rawInput
+      await saveRecord(storage, legacy)
+
+      const back = await readBackup(await createBackup(storage, NOW))
+      expect(back.data.records).toHaveLength(4)
+      expect(back.data.records.some((r) => r.items.some((i) => (i.amount ?? 0) < 0))).toBe(true)
+    })
+  })
+
   it('照片檔遺失時仍可還原紀錄（紀錄比照片重要）', async () => {
     await seed(storage)
     await saveRecord(storage, rec({ id: 'r1', photoId: 'p1' }), { photo: photo('p1') })
@@ -335,7 +518,10 @@ describe('還原的兩步驟安全機制', () => {
         'manifest.json': strToU8(JSON.stringify({ formatVersion: BACKUP_FORMAT_VERSION, createdAt: NOW, counts: {} })),
         'data.json': strToU8(
           JSON.stringify({
-            records: [rec({ id: 'x1', invoiceKey: key }), rec({ id: 'x2', invoiceKey: key })],
+            records: [
+              rec({ id: 'x1', invoiceNumber: 'AB12345678', invoicePeriod: '11509', invoiceKey: key }),
+              rec({ id: 'x2', invoiceNumber: 'AB12345678', invoicePeriod: '11509', invoiceKey: key }),
+            ],
             categories: [],
             rules: [],
             settings: null,

@@ -22,6 +22,14 @@ function escapeCell(value: string, delimiter: string): string {
   return needsQuotes ? `"${value.replace(/"/g, '""')}"` : value
 }
 
+// 店家、品名、備註來自外部（載具 CSV），enum 欄位可能來自手改的備份（還原不驗 enum 成員）；
+// 開頭是這些字元時 Excel 會當公式執行（CSV injection）
+const FORMULA_START = /^[=+\-@\t\r]/
+
+function neutralizeFormula(value: string): string {
+  return FORMULA_START.test(value) ? `'${value}` : value
+}
+
 export interface CsvOptions {
   delimiter?: string
   categoryNames?: Map<string, string>
@@ -39,15 +47,15 @@ export function toCsv(records: SpendRecord[], opts: CsvOptions = {}): string {
 
     const cells = [
       r.date,
-      r.merchant,
-      r.items.map((i) => i.name).join(ITEM_SEPARATOR),
+      neutralizeFormula(r.merchant),
+      neutralizeFormula(r.items.map((i) => i.name).join(ITEM_SEPARATOR)),
       String(r.amount),
-      category,
-      r.categorySource,
+      neutralizeFormula(category),
+      neutralizeFormula(r.categorySource),
       r.classifyConfidence.toFixed(2),
-      r.status,
+      neutralizeFormula(r.status),
       r.invoiceKey ?? '',
-      r.note,
+      neutralizeFormula(r.note),
     ]
     rows.push(cells.map((c) => escapeCell(c, delimiter)).join(delimiter))
   }

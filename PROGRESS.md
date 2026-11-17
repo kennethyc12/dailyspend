@@ -1,6 +1,6 @@
 # DailySpend 進度交接
 
-> 最後更新：2026-10-12
+> 最後更新：2026-11-17
 > 四份文件的分工：
 > - [README.md](./README.md) — 這專案是什麼、怎麼跑起來
 > - **這份** — 開發進度（按 Phase）、驗收結果、踩過的坑
@@ -12,7 +12,7 @@
 ## 現況
 
 **v1 功能全部完成，Phase 1–9 的程式都已寫完並通過真機驗收**，站台上線中，
-617 個測試（2026-10-22）、lint 乾淨。最後一塊（拍發票自動帶入品項）於 2026-10-11 完成。
+694 個測試（2026-11-17）、lint 乾淨。最後一塊（拍發票自動帶入品項）於 2026-10-11 完成。
 
 接下來**不需要再寫新功能**，需要的是用真實資料驗收與校準：Phase 9b 的欄位
 解析已有 2 張合規發票解析正確（其中 1 張走過記一筆）、`invoiceKey` 已在載具匯入時確認；分析門檻則還是憑常識設的預設值。
@@ -66,6 +66,7 @@
 | bulk-delete | 紀錄頁多選刪除，刪除前強制存保險備份 | ✅ | ✅ | 2026-10-26 真機驗收通過：勾選與點整列、全選目前結果、底部列不被分頁列蓋住、確認區塊文案與捲動、iOS 分享保險備份與取消、刪除後回饋與紅點、用保險備份還原。「改搜尋關鍵字後勾選清空」用中文輸入法時勾勾似乎仍在，jsdom（含模擬組字）重現不出來，記 ticket 待重現 |
 | prepare-files | 備份頁匯入或還原後重組匯出檔失敗時，不再能匯出重組前的舊檔 | ✅ | ✅ | 2026-10-29 真機驗收通過：進備份頁兩鈕可匯出、匯入載具 CSV 後匯出的 CSV 含匯入的紀錄、完整備份存檔成功且上次備份更新。組檔失敗的情境由頁面測試與突變 M1–M8 涵蓋 |
 | record-edit-categories | 直接開啟編輯頁（例如在編輯頁按「有新版本 → 更新」）時，類別選單是空的、目前類別顯示 id | ✅ | ✅ | 2026-10-29 真機驗收通過：停在編輯頁按「有新版本 → 更新」後仍在編輯頁，目前類別顯示名稱、選單可改分類且寫入；從紀錄頁進編輯頁改分類正常 |
+| hardening | 還原時逐筆驗證備份內容；CSV 文字欄位加公式前綴；文件對齊現況 | ✅ | ⏳ | 真機驗收：匯出最新完整備份後選回該檔能預覽；匯出 CSV 用 Numbers 開，一般資料正常 |
 
 ---
 
@@ -471,8 +472,9 @@ v1 的程式寫完了。接下來最有價值的不是寫功能，是**讓真實
 | **bulk-delete** ✅ | 紀錄頁「選取」模式：逐筆勾選或全選目前搜尋結果，改關鍵字清空勾選；`prepareBulkDelete`／`commitBulkDelete` 讓保險備份在 API 上強制（同還原）；確認區塊列筆數、合計、照片數、發票數與規則不刪；`deleteRecords` 為唯一刪除點，讀 DB 當下的 `photoId`（單筆刪除一併修正快照過期時刪到別筆照片、留下孤兒照片） | 單筆刪除不強制保險備份；依匯入批次撤銷、依月份／來源篩選、`hitCount` 不倒回另記 ticket；merge-provenance、tombstone、規則清單多選刪除已評估、未採用（DECISIONS） |
 | **prepare-files** ✅ | `prepareFiles` 一開始重組就把 `csvFile`／`backupFile` 清成 `null`：組檔失敗的那個檔按鈕停用（原本匯出的是匯入或還原前的舊檔，還會 `markBackedUp`），zip 失敗時新 CSV 仍可匯出；失敗文案改「準備匯出檔失敗，請離開本頁再進來重試」；頁面測試以 `IDBObjectStore.prototype.getAll` 製造失敗 | 不加重試鈕；組檔與匯入／還原重疊另記 ticket |
 | **record-edit-categories** ✅ | 編輯頁 `onMounted` 先 `refreshRecords()` 再讀紀錄：類別清單是 `useRecords` 的模組單例，其他會顯示紀錄或類別的頁進來都會載入，只有編輯頁要等第一次 `act()`，所以更新 App 後重新載入落在 `#/records/:id` 時類別選單是空的、「目前：」顯示 id；refresh 在 try 內，失敗時整頁「讀取失敗」不顯示半套資料。原 flake ticket（`RecordEditView.test.ts` 在 shuffle 下偶發失敗）同一成因：原推測「第一個測試冷啟動超過 1000ms」**已推翻**，真因是排在任何 `act()` 之前的測試拿不到類別。新增「直接開啟」與「類別讀取失敗」頁面測試；「改整筆分類」補斷言類別確實改變（使用者同意）；`otherOption` 找不到選項時說明原因 | 編輯頁多讀一次全部 records（同其他頁）；`act()` 寫入成功但重新整理失敗另記 ticket |
+| **hardening** | `readBackup` 逐筆驗證：manifest 是物件且 `formatVersion` 整數；紀錄的 `id`／`date`（存在的日期）／`merchant`／`amount`（整數 ≥ 0）／`items` 與品名／`categoryId`／`categorySource`／`classifyConfidence`／`status`／`pendingReasons`／`invoiceNumber`／`invoicePeriod`／`invoiceKey`／`note`，且 `invoiceKey`、`invoicePeriod` 要和 `buildInvoiceKey(date, invoiceNumber)` 一致；規則、類別、照片 meta 的必要欄位。壞一筆整份拒收，訊息指出第幾筆、哪個欄位，在保險備份與寫入之前。B2（`4e78b85`）「接受的風險：備份只驗證結構」的觸發點（支援手改備份檔）就此處理。CSV 的店家、品項、類別、備註，以及 `categorySource`、`status`（手改備份可塞任意字串）以 `=` `+` `-` `@` tab CR 開頭時補 `'`。改 `backup.test.ts`、`BackupView.test.ts` 兩份 fixture 成完整且 key 一致的紀錄（使用者同意，斷言不改） | 不驗 enum 成員、`createdAt`／`updatedAt`／`sourceType`、settings（`migrateSettings` 每次開啟補鍵）；B2 之前「有號碼＋不存在日期」的舊紀錄會被擋（機率極低）；重複 `id`、settings 缺 `key` 已評估、不做；`'` 在試算表是否可見待真機確認 |
 
-另外二十七張 ticket：
+另外二十八張 ticket：
 - 返回分析頁時展開與捲動消失：從佐證清單點進一筆再「← 返回」，清單收合、可能回到頁首（沒有 `keep-alive`、`scrollBehavior`）。使用者 2026-10-17 決定接受。觸發點：真機回報看完一筆回來找不到原本那條
 - 設定頁照片壓縮的無效輸入靜默忽略：`updatePhotoSetting` 在 `value <= 0` 時直接 return、沒有提示，`quality` 大於 1 也接受（B6a 只做分析頁）。觸發點：真機改壞照片參數，或 9b-3 驗收時
 - 記一筆讀 QR 時 `detectQrCodes` 回 `error`（例如 wasm 載入失敗）：畫面顯示原文、不進錯誤紀錄，「讀取發票失敗」字樣在 `onPickPhoto` 寫了兩次（結果分支與 catch）。觸發點：有人遇到 wasm 載入失敗，或 QrLab 下架時（`detectQrCodes` 兩頁共用，正確修法要改它的回傳；使用者 2026-10-16 決定，2026-10-18 改觸發點）
@@ -489,12 +491,13 @@ v1 的程式寫完了。接下來最有價值的不是寫功能，是**讓真實
 - QR 路徑不讀 `needsReclassify`：`createFromInvoice` 合併後品項變了也不會重跑分類（載具匯入已用 `applyClassification` 處理）。觸發點：QR 合併進既有紀錄後分類明顯錯誤
 - 組檔與匯入／還原重疊：`importLocked` 與還原選檔都不看 `preparing`，進備份頁那一輪組檔還沒結束就匯入或還原時，兩輪 `prepareFiles` 重疊；舊那一輪較晚結束會用匯入前的資料蓋掉新檔，並在 finally 把 `preparing` 改回 false（prepare-files 擋不住）。照片多、iPhone 組檔要好幾秒時才可能發生。觸發點：真機上匯入或還原後馬上匯出，拿到的是舊資料
 - 部分失敗後錯誤訊息被匯出清掉：備份頁重組時 zip 失敗、CSV 成功，使用者點「匯出 CSV」後 `exportCsv` 清掉 `errorMsg`，「完整備份」仍停用卻不再說明原因（prepare-files 不處理，使用者 2026-10-29 決定）。修法：組檔錯誤獨立成一個 ref，不被匯出動作清掉。觸發點：使用者回報完整備份鈕灰掉不知道為什麼
+- 還原預覽的「將寫入 N 筆紀錄」讀 manifest 宣稱的 `counts.records`，不是 `data.records.length`（照片數卻是實際值）；手改過的備份兩者可能不同（hardening 不處理）。觸發點：預覽筆數和還原後實際筆數對不上
 - 寫入成功但重新整理失敗，訊息說成失敗：編輯頁 `act()` 在寫入後 `refreshRecords()`，它失敗時走同一個 catch 顯示「操作失敗」，資料其實已寫入；備份頁匯入的同類情況見 `BackupView.test.ts` 的 `it.todo`（現在可以用 `IDBObjectStore.prototype.getAll` 製造失敗）。觸發點：使用者回報顯示失敗但資料其實改了
 - 「用發票資料存檔」沒有檢查儲存層是否初始化完成（文字的「存檔」有檢查 `state !== 'ready'`）。機率低，只記錄
 - 重跑時記憶體 settings 被蓋回：`runInit` 的 `settings.value = current` 在 `requestPersist` 之後才執行，這段期間在設定頁改了照片壓縮，記憶體裡的值會被蓋回舊的（DB 是對的）。觸發點：真機回報照片壓縮欄位跳回舊值
 - 備份頁不等初始化：`BackupView` 的 `onMounted(prepareFiles)` 不等 `initStorage`，首次安裝後直接冷啟動進 `/backup` 時，匯出檔可能在 seed 之前就組好。機率極低。觸發點：使用者回報第一次的匯出檔是空的
 - 還原後立刻跳提醒：備份檔裡的 `lastBackupAt` 是匯出前的值（`markBackedUp` 在匯出之後才寫），`restoreBackup` 整份覆蓋 settings，所以用最新備份還原後可能馬上顯示「該備份了」。使用者 2026-10-18 決定接受。觸發點：真機遇到時覺得吵
-- 死 code 清點：`StoragePort.close`（adapter 有實作、正式程式沒呼叫端）、`confirmRecord`（只有 `entryService.test.ts`、`carrierImportService.test.ts`、`RecordsView.test.ts` 在用）、`storage/index.ts` 的 `toIdbRange` 轉出（沒人從 index 匯入）、`runBlobRoundTrip`／`BlobRoundTrip`（Phase 2 真機自檢，沒有呼叫端）、`isStandardInvoiceNumber`（design.md:705 說「只供 UI 提示」，UI 沒接）。B7b 不動（使用者 2026-10-18 決定）。觸發點：下一次清理 port 或 storage 介面時
+- 死 code 清點：`StoragePort.close`（adapter 有實作、正式程式沒呼叫端）、`confirmRecord`（只有 `entryService.test.ts`、`carrierImportService.test.ts`、`RecordsView.test.ts` 在用）、`storage/index.ts` 的 `toIdbRange` 轉出（沒人從 index 匯入）、`runBlobRoundTrip`／`BlobRoundTrip`（Phase 2 真機自檢，沒有呼叫端）、`isStandardInvoiceNumber`（design.md:705 說「只供 UI 提示」，UI 沒接）、`StoragePort.query`／`KeyRange`／`toIdbRange`（只有 `buildCsvFile(range)` 有條件呼叫，UI 從不傳 range；CSV 日期區間使用者 2026-11-17 決定不做）。B7b 不動（使用者 2026-10-18 決定）。觸發點：下一次清理 port 或 storage 介面時
 - 「null 類別 → 標籤，否則查表」有兩份實作：`useRecords.ts` 的 `categoryName` 與 `csv.ts` 的 `toCsv`（B7c 只把文案換成 `UNCATEGORIZED` 常數，沒合併）。觸發點：要改類別名稱的 fallback 時（例如刪除類別後的顯示）
 - 依匯入批次撤銷（bulk-delete 評估後不做）：紀錄沒有匯入批次識別，合併過的紀錄也回不到合併前的樣子，要改 schema 與備份格式。目前用「搜尋 → 全選目前結果 → 刪除」代替。觸發點：搜尋加全選圈不出某次匯入的範圍
 - 紀錄頁沒有依月份或來源篩選（bulk-delete 不做）：多選刪除只能靠搜尋店家、品項、類別圈範圍。觸發點：要刪某個月或所有載具紀錄時，搜尋加全選不夠用
@@ -528,7 +531,7 @@ v1 的程式寫完了。接下來最有價值的不是寫功能，是**讓真實
 | 項目 | 需要什麼 |
 |---|---|
 | 店家名稱合併工具（§8.2 已知限制） | 實際遇到 Netflix / 網飛 這類問題時再做 |
-| 元件測試 | 無阻塞。記帳頁與編輯頁現在只有 service 層測試 |
+| ~~元件測試~~ | ~~無阻塞。記帳頁與編輯頁現在只有 service 層測試~~（B1 起陸續補上，現有 7 個頁面測試；B8 已更正 FEATURES，這裡漏改，hardening 2026-11-17 補） |
 | 從相簿選圖時讀 EXIF 拍攝時間 | 現在 `capturedAt` 是匯入時間 |
 | OCR、AI 分類、財政部官方載具格式 | 都在 v1 範圍外，需要時先討論（發票存摺 CSV 匯入已在 C2 完成） |
 

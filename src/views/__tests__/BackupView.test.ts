@@ -34,15 +34,28 @@ async function backupWithoutRecords(): Promise<File> {
 /** 兩筆同 invoiceKey 會撞上 unique index：清空之後第二筆寫入必定失敗。 */
 function conflictingBackup(): File {
   const key = '11509-AB12345678'
-  const record = (id: string): Partial<SpendRecord> => ({
+  const record = (id: string): SpendRecord => ({
     id,
     date: '2026-10-05',
     merchant: '全家',
     amount: 55,
     items: [],
+    categoryId: null,
+    categorySource: 'rule',
+    classifyConfidence: 0,
+    recognizeConfidence: null,
     status: 'confirmed',
     pendingReasons: [],
+    invoiceNumber: 'AB12345678',
+    invoicePeriod: '11509',
     invoiceKey: key,
+    invoiceRandomCode: null,
+    sourceType: 'carrier',
+    photoId: null,
+    rawRecognition: null,
+    note: '',
+    createdAt: 0,
+    updatedAt: 0,
   })
   const zip = zipSync({
     'manifest.json': strToU8(

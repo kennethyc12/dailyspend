@@ -29,30 +29,29 @@
 
 ```
 ┌─────────────────────────────────────────┐
-│ UI (Vue 3 components / views)           │
-│  安裝引導 · 快速輸入 · 待確認 · 列表      │
-│  分析 · 規則管理 · 設定/備份              │
+│ UI (Vue 3 views / components)           │
+│  安裝引導 · 記一筆 · 紀錄 · 待確認        │
+│  分析 · 設定 · 備份與匯入                 │
 └───────────────┬─────────────────────────┘
-                │ 只呼叫 use* composables，不碰 adapter
+                │ 透過 composables 與 services，不碰 adapter
 ┌───────────────▼─────────────────────────┐
 │ Application (composables / services)    │
-│  recordService · classifyService         │
-│  dedupeService · analysisService         │
-│  backupService                           │
-└───┬──────────┬──────────┬───────────────┘
-    │          │          │   依賴的是 interface，不是實作
-┌───▼────┐ ┌───▼──────┐ ┌─▼───────────┐
-│Storage │ │Recognizer│ │ Classifier  │
-│Port    │ │Port      │ │ Port        │
-├────────┤ ├──────────┤ ├─────────────┤
-│IndexedDB│ │QrRecognizer│ │RuleClassifier│
-│(v1)    │ │(v1)      │ │(v1)         │
-│  …SQLite│ │ …OcrRecognizer│ │ …AiClassifier│
-└────────┘ └──────────┘ └─────────────┘
+│  entryService · recordService            │
+│  invoiceService · carrierImportService   │
+│  ruleService · backupService …           │
+│  classifyWithRules · detectQrCodes       │ ← 直接呼叫，沒有 port
+└───────────────┬─────────────────────────┘
+                │ 依賴的是 interface，不是實作
+┌───────────────▼─────────┐
+│ StoragePort             │
+├─────────────────────────┤
+│ IndexedDbAdapter（v1）   │
+└─────────────────────────┘
 ```
 
 > 2026-10-18 更正（B7b，使用者同意）：實際只剩 `StoragePort`。`RecognizerPort` 已評估、未採用（QR 偵測直接呼叫 `src/recognize/qrDetect.ts`）；
 > `ClassifierPort` 與 `RuleClassifier` 依 D4 刪除，分類走 `classifyWithRules`。
+> 2026-11-17 更正（hardening）：上圖改成現況。原圖另有 `RecognizerPort`（`QrRecognizer`、`OcrRecognizer` 擴充示意）、`ClassifierPort`（`RuleClassifier`、`AiClassifier`）、SQLite adapter 示意，以及 `classifyService`／`dedupeService`／`analysisService` 三個從未建立的 service 名稱。
 
 **Port（介面）= 穩定契約，Adapter（實作）= 可替換。**
 
@@ -133,7 +132,7 @@ transaction(fn) 的 fn 內部：
    })                                     ← 只有這裡寫
 ```
 
-第 4 步與第 6 步之間理論上有 race，但本 App 單人單分頁，且 `by_invoiceKey` 是 unique index，衝突時 adapter 會拋 `ConstraintError`，service 捕捉後轉為 `duplicate_conflict` 並重跑 merge。
+第 4 步與第 6 步之間理論上有 race，但本 App 單人單分頁，且 `by_invoiceKey` 是 unique index，衝突時 adapter 會拋 `ConstraintError`，~~service 捕捉後轉為 `duplicate_conflict` 並重跑 merge~~ service 捕捉後重讀一次再 merge；`duplicate_conflict` 只在欄位值真的不同時由 `mergeRecords` 標記（hardening 2026-11-17 對齊實作）。
 
 ### 2.3 RecognizerPort / ClassifierPort
 
@@ -248,6 +247,8 @@ query('records', 'by_date', { gte: '2026-10-01', lte: '2026-10-31' })
 **超商不設 merchant fallback 規則（v0.2 定案）。** 7-11、全家、萊爾富等橫跨飲料 / 飲食 / 日用品，內建規則不替它們猜類別——沒有品項時直接 `pending(ambiguous_merchant)`。
 
 理由：給一個預設值（例如都算「日用品」）會讓「飲料」的月總額被系統性低估，而 §8 的建議排序完全靠這些金額，猜錯一次就污染所有分析。初期待確認筆數會偏多，但每修正一次就會透過 §6.2 建立一條 itemKeyword 規則（咖啡 → 飲料），待確認量會自己收斂。
+
+> **尚未實作**（hardening，2026-11-17）：目前沒有類別管理畫面，12 個內建類別固定，停用、自建、刪除轉移都還沒做；使用者決定類別夠用。下表是日後實作時的規格。
 
 **刪除類別的行為（v0.1 未定義）：**
 
@@ -684,7 +685,7 @@ v0.1 寫「有品項 → 以最長的 item.name 建規則」有明確的教錯�
 
 ### 6.3 規則管理畫面
 
-列出所有規則，可依 `type` / `origin` 篩選，顯示 `hitCount` 與 `lastHitAt`，支援刪除 userCorrection 規則與停用 builtin 規則。
+列出所有規則，可依 `type` / `origin` 篩選，顯示 `hitCount`~~ 與 `lastHitAt`~~（設定頁只顯示 `hitCount`，hardening 2026-11-17），支援刪除 userCorrection 規則與停用 builtin 規則。
 
 刪除規則**不回溯**修改既有紀錄（避免歷史被改寫），僅影響日後分類。
 > v2 可考慮在刪除對話框加一個**選用**的「一併套用到既有紀錄」按鈕，預設不勾。
@@ -738,7 +739,7 @@ if (!existing) → 新增
 else → merge(existing, incoming)
 ```
 
-查詢與寫入分屬不同 transaction（§2.2）；unique index 的 `ConstraintError` 作為最後防線，捕捉後轉 `duplicate_conflict` 並重跑 merge。
+查詢與寫入分屬不同 transaction（§2.2）；unique index 的 `ConstraintError` 作為最後防線，~~捕捉後轉 `duplicate_conflict` 並重跑 merge~~ 捕捉後重讀一次再 merge；`duplicate_conflict` 只在欄位值不同時標記（hardening 2026-11-17）。
 
 這是手輸與 QR 的寫入路徑（`saveRecord`）。載具匯入為了全有或全無，另有單一 transaction 的寫入路徑（`commitCarrierImport`），合併規則共用 `mergeForWrite`，見 §11.3。
 
@@ -920,27 +921,23 @@ v1 手動輸入沒有單品金額，`item.amount` 幾乎都是 `null`。定案�
             ┌──────────────┐
 輸入文字 ───►│ parseQuickInput│──► 純數字 token? ──► pending(ambiguous_item_tokens)
             └───────┬──────┘
-拍照 Blob ──►┌──────▼───────┐
-            │ RecognizerChain│ (qr → 未來 ocr)
+拍照 Blob ──►┌──────▼──────────────────────┐
+            │ detectQrCodes + parseEInvoicePayload │ 讀到發票就改走發票面板，文字框隱藏
+            └───────┬──────────────────────┘
+                    ▼
+            ┌──────────────┐
+            │ classifyWithRules │ → categoryId / classifyConfidence / pendingReasons
             └───────┬──────┘
                     ▼
             ┌──────────────┐
-            │  mergeFields  │ 手輸 vs 辨識，衝突記 pendingReason
+            │ prepareRecord │ buildInvoiceKey（唯一產生點）＋狀態型原因
             └───────┬──────┘
                     ▼
             ┌──────────────┐
-            │  Classifier   │ → categoryId / classifyConfidence / source
+            │  saveRecord   │ by invoiceKey → mergeForWrite or insert（唯讀查詢）
             └───────┬──────┘
                     ▼
-            ┌──────────────┐
-            │ buildInvoiceKey│ period + number
-            └───────┬──────┘
-                    ▼
-            ┌──────────────┐
-            │    Dedupe     │ by invoiceKey → merge or insert（唯讀查詢）
-            └───────┬──────┘
-                    ▼
-         classifyConfidence OK? ──No──► status='pending' ──► 待確認佇列
+         pendingReasons 為空? ──No──► status='pending' ──► 待確認佇列
                     │Yes                                        │
                     ▼                                  使用者修正 ──► 寫回規則(§6.2)
             status='confirmed'                                   │
@@ -950,6 +947,10 @@ v1 手動輸入沒有單品金額，`item.amount` 幾乎都是 `null`。定案�
                     │ transaction(['records','photos']) │ ← 只做讀寫，§2.2
                     └──────────────────────────────┘
 ```
+
+> 2026-11-17 更正（hardening）：上圖改成現況。原圖的 `RecognizerChain`（qr → 未來 ocr）換成 `detectQrCodes + parseEInvoicePayload`；
+> `mergeFields`（手輸 vs 辨識）拿掉——讀到發票時只走發票這條路（B3b D1），不和手輸合併；`Classifier` 換成 `classifyWithRules`；
+> status 由 `pendingReasons` 是否為空決定，不只看 `classifyConfidence`。
 
 **虛線以上全部在 transaction 之外。** 照片與紀錄的實際寫入在同一個 transaction 內，避免孤兒照片。
 
@@ -1004,7 +1005,7 @@ v1 手動輸入沒有單品金額，`item.amount` 幾乎都是 `null`。定案�
 
 | 功能 | 格式 | 內容 |
 |---|---|---|
-| CSV 匯出 | UTF-8 with BOM（Excel 相容） | 一筆紀錄一列，items 以 `;` 串接；可選日期區間 |
+| CSV 匯出 | UTF-8 with BOM（Excel 相容） | 一筆紀錄一列，items 以 `;` 串接；~~可選日期區間~~（UI 沒有，使用者決定不做，hardening 2026-11-17）；文字欄位開頭是 `=` `+` `-` `@` tab CR 時補 `'`（CSV injection） |
 | 完整備份 | `.zip`（JSON + 照片） | records + categories + rules + settings + photos |
 | 還原 | 讀 zip | **覆寫操作，需二次確認**，並先自動匯出一份當前備份 |
 | 載具 CSV 匯入 | 讀發票存摺 CSV | 預覽 → 選擇可能重複 → 一次寫入；見 §11.3 |
@@ -1053,6 +1054,8 @@ dailyspend-backup-YYYY-MM-DD.zip
 第一步解析備份檔並**同時產出當前資料的保險備份**，第二步才覆寫。拆成兩個函式是為了讓「二次確認」與「先自動匯出一份當前備份」在 API 上就是強制的，而不是靠呼叫端自律。UI 上也鎖住順序：沒存下保險備份，「確認覆寫」按鈕是 disabled。
 
 備份檔有問題時在第一步就失敗，既有資料完全沒被碰過。
+
+**逐筆驗證**（hardening，2026-11-17）：`readBackup` 除了形狀，還逐筆檢查讀取端會炸、會算出 NaN、或會讓去重失效的欄位，並要求 `invoiceKey`、`invoicePeriod` 和 `buildInvoiceKey(date, invoiceNumber)` 一致。壞一筆就整份拒收，訊息指出第幾筆、哪個欄位；不替壞資料修補（資料不失真）。enum 成員不驗（型別定義沒有 runtime 清單）。
 
 #### 不可把 Vue 深層響應式物件寫進 IndexedDB（Phase 6 真機抓到）
 
