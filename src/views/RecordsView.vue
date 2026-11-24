@@ -4,6 +4,8 @@ import { RouterLink } from 'vue-router'
 import { categoryName, refreshRecords, useRecords } from '@/composables/useRecords'
 import type { SpendRecord } from '@/models/types'
 import { NO_MERCHANT } from '@/models/labels'
+import { todayIso } from '@/parsing/quickInput'
+import { summarizeMonth } from '@/views/monthSummary'
 import { getStorage } from '@/storage'
 import { saveFile } from '@/backup/share'
 import { handleError } from '@/errors/handleError'
@@ -13,9 +15,15 @@ import {
   type BulkDeletePreview,
 } from '@/services/backupService'
 
-const { records } = useRecords()
+const { records, categories } = useRecords()
 const storage = getStorage()
 const keyword = ref('')
+
+// 進頁時取一次；頁面開著跨過午夜不換月，重新進頁才換
+const today = todayIso()
+const monthLabel = `${Number(today.slice(5, 7))} 月`
+// 刻意讀 records 而不是 filtered：總覽回答固定的問題，不跟著搜尋變
+const summary = computed(() => summarizeMonth(records.value, categories.value, today))
 
 onMounted(refreshRecords)
 
@@ -164,6 +172,21 @@ function exitSelecting() {
   <main class="page" :class="{ 'with-bar': showBar }">
     <h1>紀錄</h1>
 
+    <section v-if="records.length > 0" class="panel month">
+      <h2>本月 · {{ monthLabel }}</h2>
+      <p v-if="summary.count === 0" class="hint">本月還沒有紀錄</p>
+      <template v-else>
+        <p class="month-total">{{ summary.count }} 筆 · ${{ summary.total }}</p>
+        <p v-if="summary.pendingCount > 0" class="sub">其中 {{ summary.pendingCount }} 筆待確認</p>
+        <ul class="month-categories">
+          <li v-for="c in summary.byCategory" :key="c.categoryId ?? ''" class="row">
+            <span :class="{ warn: c.categoryId === null }">{{ categoryName(c.categoryId) }}</span>
+            <span class="amount">${{ c.total }}</span>
+          </li>
+        </ul>
+      </template>
+    </section>
+
     <input
       v-model="keyword"
       class="search"
@@ -255,7 +278,17 @@ function exitSelecting() {
 </template>
 
 <style scoped>
+.month-categories {
+  list-style: none;
+  margin-top: var(--space-2);
+}
+
+.month-categories li {
+  padding: 2px 0;
+}
+
 .search {
+  margin-top: var(--space-3);
   width: 100%;
   padding: var(--space-3);
   border: 1px solid var(--c-border);

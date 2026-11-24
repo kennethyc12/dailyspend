@@ -1,11 +1,11 @@
 // @vitest-environment jsdom
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { IDBObjectStore } from 'fake-indexeddb'
 import type { VueWrapper } from '@vue/test-utils'
 import RecordsView from '@/views/RecordsView.vue'
 import type { SpendRecord } from '@/models/types'
 import { confirmRecord, createFromText, deleteRecord } from '@/services/entryService'
-import { pendingRecords, refreshRecords } from '@/composables/useRecords'
+import { categoryName, pendingRecords, refreshRecords } from '@/composables/useRecords'
 import { button, mountView, useViewTest, waitForText } from '@/test/mountView'
 import { clearErrors } from '@/errors/errorLog'
 import { saveFile } from '@/backup/share'
@@ -293,5 +293,101 @@ describe('紀錄頁：多選刪除', () => {
     expect(await storage().count('records')).toBe(3)
     clearErrors()
     vi.restoreAllMocks()
+  })
+})
+
+describe('紀錄頁：本月總覽（month-overview）', () => {
+  beforeEach(() => {
+    // 只假 Date：fake-indexeddb 與 vi.waitFor 靠 timers，全假會卡住
+    vi.useFakeTimers({ toFake: ['Date'], now: new Date(2026, 10, 15, 12) })
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  async function openOverview() {
+    await refreshRecords()
+    const wrapper = await mountView(RecordsView, '/records')
+    await vi.waitFor(() => expect(wrapper.find('section.month').exists()).toBe(true))
+    return wrapper
+  }
+
+  const monthText = (w: VueWrapper) => w.find('section.month').text()
+
+  it('標題帶月份；只算本月，類別列含「未分類」', async () => {
+    await textRecord('某店 100')
+    const drink = await textRecord('另一店 咖啡 55')
+    await textRecord('10/05 上月店 咖啡 999')
+    const wrapper = await openOverview()
+
+    const text = monthText(wrapper)
+    expect(text).toContain('本月 · 11 月')
+    expect(text).toContain('2 筆 · $155')
+    const rows = wrapper.findAll('section.month li').map((li) => li.text())
+    expect(rows).toEqual([
+      expect.stringContaining('未分類'),
+      expect.stringContaining(categoryName.value(drink.categoryId)),
+    ])
+    expect(rows[0]).toContain('$100')
+    expect(rows[1]).toContain('$55')
+    expect(rows[1]).not.toContain(drink.categoryId!)
+  })
+
+  it('個位數月份不補 0：3 月顯示「本月 · 3 月」', async () => {
+    vi.setSystemTime(new Date(2026, 2, 10, 12))
+    await textRecord('某店 100')
+    const wrapper = await openOverview()
+    expect(monthText(wrapper)).toContain('本月 · 3 月')
+  })
+
+  it('有待確認：顯示「其中 N 筆待確認」；全部確認後沒有這行', async () => {
+    const pending = await textRecord('某店 100')
+    await confirmRecord(storage(), await textRecord('另一店 咖啡 55'))
+    const wrapper = await openOverview()
+    expect(monthText(wrapper)).toContain('其中 1 筆待確認')
+
+    await confirmRecord(storage(), pending)
+    await refreshRecords()
+    await vi.waitFor(() => expect(monthText(wrapper)).not.toContain('待確認'))
+  })
+
+  it('搜尋與選取模式不影響數字', async () => {
+    await textRecord('某店 100')
+    await textRecord('另一店 咖啡 55')
+    const wrapper = await openOverview()
+    const before = monthText(wrapper)
+
+    await wrapper.find('input.search').setValue('另一店')
+    expect(wrapper.find('.toolbar').text()).toContain('1 筆')
+    expect(monthText(wrapper)).toBe(before)
+
+    await button(wrapper, '選取').trigger('click')
+    expect(monthText(wrapper)).toBe(before)
+  })
+
+  it('只有上月紀錄：「本月還沒有紀錄」', async () => {
+    await textRecord('10/05 上月店 咖啡 999')
+    const wrapper = await openOverview()
+    expect(monthText(wrapper)).toContain('本月還沒有紀錄')
+    expect(wrapper.find('section.month li').exists()).toBe(false)
+  })
+
+  it('完全沒有紀錄：不顯示 panel', async () => {
+    await refreshRecords()
+    const wrapper = await mountView(RecordsView, '/records')
+    await waitForText(wrapper, '還沒有任何紀錄')
+    expect(wrapper.find('section.month').exists()).toBe(false)
+  })
+
+  it('刪除一筆本月紀錄後 panel 更新', async () => {
+    await textRecord('某店 100')
+    const other = await textRecord('另一店 咖啡 55')
+    const wrapper = await openOverview()
+    expect(monthText(wrapper)).toContain('2 筆 · $155')
+
+    await deleteRecord(storage(), other)
+    await refreshRecords()
+    await vi.waitFor(() => expect(monthText(wrapper)).toContain('1 筆 · $100'))
   })
 })
