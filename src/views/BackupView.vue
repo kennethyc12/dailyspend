@@ -101,6 +101,9 @@ function recordLabel(r: SpendRecord): string {
   return `${shortDate(r.date)} ${r.merchant || NO_MERCHANT} $${r.amount}${items ? `（${items}）` : ''}`
 }
 
+// 訊息在頁面底部、按鈕在頂部，所以要說「往上捲」
+const BACKUP_HINT = '資料剛更新，建議往上捲按「完整備份（zip）」存一份。'
+
 function clearImport() {
   importParsed.value = null
   importPreview.value = null
@@ -245,7 +248,9 @@ async function confirmImport() {
     }
     await prepareFiles()
     await refreshRecords()
-    message.value = summary
+    // 匯入剛改了資料，人又在備份頁，是最該備份的時機；記帳頁的逾期橫幅這裡看不到。
+    // zip 組檔失敗時按鈕停用，不提示（畫面已有「準備匯出檔失敗…」）
+    message.value = backupFile.value ? `${summary}。${BACKUP_HINT}` : summary
   } catch (err) {
     errorMsg.value = handleError(err, {
       where: 'BackupView.confirmImport.refresh',

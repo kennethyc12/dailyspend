@@ -249,6 +249,21 @@ describe('載具 CSV 匯入', () => {
     expect(after).not.toBe(before)
   })
 
+  it('匯入完成後提示順手完整備份', async () => {
+    const wrapper = await previewOf([{ total: '55' }])
+    await confirm(wrapper)
+    expect(wrapper.text()).toContain('資料剛更新，建議往上捲按「完整備份（zip）」存一份。')
+  })
+
+  it('按完整備份後，匯入後的備份提示消失', async () => {
+    const wrapper = await previewOf([{ total: '55' }])
+    await confirm(wrapper)
+    expect(wrapper.text()).toContain('往上捲按「完整備份（zip）」')
+    await button(wrapper, '完整備份（zip）').trigger('click')
+    await waitForText(wrapper, '備份已下載')
+    expect(wrapper.text()).not.toContain('往上捲')
+  })
+
   it('匯入後待確認清單立刻更新', async () => {
     await refreshRecords()
     expect(pendingRecords.value).toHaveLength(0)
@@ -369,6 +384,18 @@ describe('載具 CSV 匯入', () => {
       expect(wrapper.text()).toContain('準備匯出檔失敗，請離開本頁再進來重試')
       await button(wrapper, '匯出 CSV').trigger('click')
       expect(lastSaved()).not.toBe(before)
+      expectPrepareError()
+    })
+
+    it('匯入後組 zip 失敗：不提示備份（按鈕停用）', async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => {})
+      const wrapper = await previewOf([{ total: '55' }])
+      await waitForText(wrapper, '完整備份（zip）')
+      const spy = failGetAll('photos')
+      await confirm(wrapper)
+      spy.mockRestore()
+      expect(wrapper.text()).toContain('匯入完成')
+      expect(wrapper.text()).not.toContain('往上捲')
       expectPrepareError()
     })
 

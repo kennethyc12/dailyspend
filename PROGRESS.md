@@ -12,7 +12,7 @@
 ## 現況
 
 **v1 功能全部完成，Phase 1–9 的程式都已寫完並通過真機驗收**，站台上線中，
-709 個測試（2026-11-24）、lint 乾淨。最後一塊（拍發票自動帶入品項）於 2026-10-11 完成。
+712 個測試（2026-11-24）、lint 乾淨。最後一塊（拍發票自動帶入品項）於 2026-10-11 完成。
 
 接下來**不需要再寫新功能**，需要的是用真實資料驗收與校準：Phase 9b 的欄位
 解析已有 2 張合規發票解析正確（其中 1 張走過記一筆）、`invoiceKey` 已在載具匯入時確認；分析門檻則還是憑常識設的預設值。
@@ -68,6 +68,7 @@
 | record-edit-categories | 直接開啟編輯頁（例如在編輯頁按「有新版本 → 更新」）時，類別選單是空的、目前類別顯示 id | ✅ | ✅ | 2026-10-29 真機驗收通過：停在編輯頁按「有新版本 → 更新」後仍在編輯頁，目前類別顯示名稱、選單可改分類且寫入；從紀錄頁進編輯頁改分類正常 |
 | hardening | 還原時逐筆驗證備份內容；CSV 文字欄位加公式前綴；文件對齊現況 | ✅ | ✅ | 2026-11-24 真機驗收通過：匯出最新完整備份後選回該檔，預覽正常（真實資料沒有被新驗證擋下）；匯出 CSV 用 Numbers 開，一般資料正常 |
 | month-overview | 紀錄頁頂端「本月」總覽：筆數、總額、其中幾筆待確認、各類別小計 | ✅ | ✅ | 2026-11-24 真機驗收通過：紀錄頁頂端出現「本月 · 11 月」、筆數與總額對得上、待確認那行與類別小計正常、搜尋與選取時數字不變、間距可接受 |
+| import-backup-hint | 匯入載具 CSV 完成後提示順手完整備份 | ✅ | ⏳ | 真機驗收：匯入一份 CSV 後底部訊息有提示；按完整備份後提示消失 |
 
 ---
 
@@ -475,6 +476,7 @@ v1 的程式寫完了。接下來最有價值的不是寫功能，是**讓真實
 | **record-edit-categories** ✅ | 編輯頁 `onMounted` 先 `refreshRecords()` 再讀紀錄：類別清單是 `useRecords` 的模組單例，其他會顯示紀錄或類別的頁進來都會載入，只有編輯頁要等第一次 `act()`，所以更新 App 後重新載入落在 `#/records/:id` 時類別選單是空的、「目前：」顯示 id；refresh 在 try 內，失敗時整頁「讀取失敗」不顯示半套資料。原 flake ticket（`RecordEditView.test.ts` 在 shuffle 下偶發失敗）同一成因：原推測「第一個測試冷啟動超過 1000ms」**已推翻**，真因是排在任何 `act()` 之前的測試拿不到類別。新增「直接開啟」與「類別讀取失敗」頁面測試；「改整筆分類」補斷言類別確實改變（使用者同意）；`otherOption` 找不到選項時說明原因 | 編輯頁多讀一次全部 records（同其他頁）；`act()` 寫入成功但重新整理失敗另記 ticket |
 | **hardening** ✅ | `readBackup` 逐筆驗證：manifest 是物件且 `formatVersion` 整數；紀錄的 `id`／`date`（存在的日期）／`merchant`／`amount`（整數 ≥ 0）／`items` 與品名／`categoryId`／`categorySource`／`classifyConfidence`／`status`／`pendingReasons`／`invoiceNumber`／`invoicePeriod`／`invoiceKey`／`note`，且 `invoiceKey`、`invoicePeriod` 要和 `buildInvoiceKey(date, invoiceNumber)` 一致；規則、類別、照片 meta 的必要欄位。壞一筆整份拒收，訊息指出第幾筆、哪個欄位，在保險備份與寫入之前。B2（`4e78b85`）「接受的風險：備份只驗證結構」的觸發點（支援手改備份檔）就此處理。CSV 的店家、品項、類別、備註，以及 `categorySource`、`status`（手改備份可塞任意字串）以 `=` `+` `-` `@` tab CR 開頭時補 `'`。改 `backup.test.ts`、`BackupView.test.ts` 兩份 fixture 成完整且 key 一致的紀錄（使用者同意，斷言不改） | 不驗 enum 成員、`createdAt`／`updatedAt`／`sourceType`、settings（`migrateSettings` 每次開啟補鍵）；B2 之前「有號碼＋不存在日期」的舊紀錄會被擋（機率極低）；重複 `id`、settings 缺 `key` 已評估、不做；`'` 在試算表是否可見待真機確認 |
 | **month-overview** ✅ | 紀錄頁頂端「本月 · N 月」總覽：筆數、總額、其中 N 筆待確認、各類別小計（金額大到小、同額依 `sortOrder`、0 元類別不列）；純函式 `summarizeMonth`（`src/views/monthSummary.ts`），月份比對重用 `monthKey`；不受搜尋與選取影響，本月無紀錄顯示「本月還沒有紀錄」，App 無紀錄不顯示；標題帶月份、待確認那行純文字、金額不加千分位（使用者 2026-11-24 同意草圖與三個選項） | 頁面開著跨午夜不換月；不做月份切換；整頁金額格式不一致另記 ticket |
+| **import-backup-hint** | `confirmImport` 在 zip 組好時，成功訊息後面接「資料剛更新，建議往上捲按「完整備份（zip）」存一份。」；附在 `message` 上，按匯出或備份時被覆蓋；zip 組檔失敗不提示 | research 的「有新增或合併才提示」是死條件（`writes.length === inserted + merged`，0 筆時確認鈕停用），使用者同意拿掉；訊息位置維持頁面底部 |
 
 另外二十九張 ticket：
 - 返回分析頁時展開與捲動消失：從佐證清單點進一筆再「← 返回」，清單收合、可能回到頁首（沒有 `keep-alive`、`scrollBehavior`）。使用者 2026-10-17 決定接受。觸發點：真機回報看完一筆回來找不到原本那條
