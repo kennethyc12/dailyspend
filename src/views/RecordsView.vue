@@ -176,7 +176,7 @@ function exitSelecting() {
       <h2>本月 · {{ monthLabel }}</h2>
       <p v-if="summary.count === 0" class="hint">本月還沒有紀錄</p>
       <template v-else>
-        <p class="month-total">{{ summary.count }} 筆 · ${{ summary.total }}</p>
+        <p>{{ summary.count }} 筆 · ${{ summary.total }}</p>
         <p v-if="summary.pendingCount > 0" class="sub">其中 {{ summary.pendingCount }} 筆待確認</p>
         <ul class="month-categories">
           <li v-for="c in summary.byCategory" :key="c.categoryId ?? ''" class="row">

@@ -170,22 +170,27 @@ function confirmPicked() {
   const ids = picked.value.map((r) => r.id)
   const categoryId = bulkCategory.value
   if (ids.length === 0 || !categoryId) return
+  let written = false
   return run(
     BULK,
     async () => {
       const out = await confirmPendingBatch(storage, ids, categoryId)
+      written = true
       for (const id of ids) forget(id)
       selected.value = new Set()
+      // 不沿用上次的類別：下一批直接按確認會套錯
+      bulkCategory.value = ''
       const name = categoryName.value(categoryId)
       notice.value = out.skipped
-        ? `已確認 ${out.confirmed} 筆為 ${name}，${out.skipped} 筆已被處理，略過`
+        ? `已確認 ${out.confirmed} 筆為 ${name}，${out.skipped} 筆狀態已變更，略過`
         : `已確認 ${out.confirmed} 筆為 ${name}`
     },
-    '批次確認失敗，資料未變更',
+    // 寫入是單一 transaction：只有寫入本身失敗時「資料未變更」才成立
+    () => (written ? '批次確認已寫入，但更新畫面失敗' : '批次確認失敗，資料未變更'),
   )
 }
 
-async function run(id: string, fn: () => Promise<void>, failed = '操作失敗') {
+async function run(id: string, fn: () => Promise<void>, failed: string | (() => string) = '操作失敗') {
   if (busyId.value) return
   busyId.value = id
   errorMsg.value = null
@@ -196,7 +201,7 @@ async function run(id: string, fn: () => Promise<void>, failed = '操作失敗')
   } catch (err) {
     errorMsg.value = handleError(err, {
       where: 'PendingView.run',
-      failed,
+      failed: typeof failed === 'function' ? failed() : failed,
       conflict: DATE_CONFLICT,
     })
   } finally {
@@ -272,10 +277,10 @@ function remove(record: SpendRecord) {
 
     <div v-if="pendingRecords.length > 0" class="toolbar">
       <template v-if="selecting">
-        <button class="btn-text" :disabled="busyId === BULK" @click="selectAllPickable">
+        <button class="btn-text" :disabled="busyId !== null" @click="selectAllPickable">
           全選可勾的
         </button>
-        <button class="btn-text" :disabled="busyId === BULK" @click="exitSelecting">完成</button>
+        <button class="btn-text" :disabled="busyId !== null" @click="exitSelecting">完成</button>
       </template>
       <button v-else class="btn-text" @click="selecting = true">選取</button>
     </div>

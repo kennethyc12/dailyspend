@@ -837,7 +837,7 @@ describe('多選指定類別（pending-bulk-confirm）', () => {
     await storage().delete('records', 'r1')
     await button(pending, '確認 2 筆為 娛樂').trigger('click')
 
-    await waitForText(pending, '已確認 1 筆為 娛樂，1 筆已被處理，略過')
+    await waitForText(pending, '已確認 1 筆為 娛樂，1 筆狀態已變更，略過')
   })
 
   it('沒勾時沒有底部列；沒選類別時確認鈕停用', async () => {
@@ -935,6 +935,8 @@ describe('多選指定類別（pending-bulk-confirm）', () => {
       await vi.waitFor(() => expect(confirm().element.disabled).toBe(true))
       expect(checkbox(card(pending, '甲店')).element.disabled).toBe(true)
       expect(barSelect(pending).element.disabled).toBe(true)
+      expect(button(pending, '全選可勾的').element.disabled).toBe(true)
+      expect(button(pending, '完成').element.disabled).toBe(true)
     } finally {
       gate.resolve()
     }
@@ -955,6 +957,44 @@ describe('多選指定類別（pending-bulk-confirm）', () => {
 
     expect(pending.findAll('input[type="checkbox"]')).toHaveLength(0)
     expect(button(pending, '選取').exists()).toBe(true)
+  })
+
+  it('寫入成功但更新畫面失敗 → 不說「資料未變更」', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const pending = await seedPending([{ merchant: '甲店' }, { merchant: '乙店' }])
+    await enterSelecting(pending)
+    await tick(pending, '甲店')
+    await barSelect(pending).setValue('fun')
+    // 寫入走 transaction 的 get／put，之後 run() 的 refreshRecords 才 getAll records
+    const real = IDBObjectStore.prototype.getAll
+    vi.spyOn(IDBObjectStore.prototype, 'getAll').mockImplementation(function (
+      this: IDBObjectStore,
+      ...args: Parameters<IDBObjectStore['getAll']>
+    ) {
+      if (this.name === 'records') throw new DOMException('boom', 'UnknownError')
+      return real.apply(this, args)
+    })
+    await button(pending, '確認 1 筆為 娛樂').trigger('click')
+    await waitForText(pending, '批次確認已寫入，但更新畫面失敗')
+    vi.restoreAllMocks()
+
+    expect(pending.text()).not.toContain('資料未變更')
+    expect((await records()).find((r) => r.merchant === '甲店')!.status).toBe('confirmed')
+    clearErrors()
+  })
+
+  it('批次確認後底部類別回到「請選擇」', async () => {
+    const pending = await seedPending([{ merchant: '甲店' }, { merchant: '乙店' }])
+    await enterSelecting(pending)
+    await tick(pending, '甲店')
+    await barSelect(pending).setValue('fun')
+    await button(pending, '確認 1 筆為 娛樂').trigger('click')
+    await waitForText(pending, '已確認 1 筆為 娛樂')
+
+    await tick(pending, '乙店')
+    expect(barSelect(pending).element.value).toBe('')
+    const confirm = barButtons(pending).find((b) => b.text().startsWith('確認'))!
+    expect(confirm.element.disabled).toBe(true)
   })
 
   it('寫入失敗 → 說明資料未變更，勾選保留', async () => {
