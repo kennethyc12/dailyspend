@@ -1,14 +1,17 @@
 // @vitest-environment jsdom
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount, type DOMWrapper, type VueWrapper } from '@vue/test-utils'
+import { IDBObjectStore } from 'fake-indexeddb'
 import QuickInputView from '@/views/QuickInputView.vue'
 import PendingView from '@/views/PendingView.vue'
 import type { Photo, Rule, SpendRecord } from '@/models/types'
 import type { StoreKey, StoreName } from '@/storage'
 import { createFromText } from '@/services/entryService'
-import { refreshRecords } from '@/composables/useRecords'
+import { pendingRecords, refreshRecords } from '@/composables/useRecords'
+import { clearErrors } from '@/errors/errorLog'
 import { prepareRecord } from '@/services/recordService'
 import { basePriority } from '@/classify/matching'
+import { deferred } from '@/test/fixtures'
 import { router } from '@/router'
 import { button, mountView, settled, useViewTest, waitForText } from '@/test/mountView'
 
@@ -662,4 +665,276 @@ describe('就地編輯（B4.2b-2）', () => {
 
   // 品名已 trim，正規化後不會是空字串；只剩 index 越界或規則被同時刪除，畫面上造不出來，由 service 測試守
   it.todo('逐項學不成規則時提示「這個品項沒辦法記成規則，只套用到這筆」')
+})
+
+describe('多選指定類別（pending-bulk-confirm）', () => {
+  type Section = DOMWrapper<Element>
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+    clearErrors()
+  })
+
+  async function seedPending(specs: { merchant: string; amount?: number; reasons?: SpendRecord['pendingReasons'] }[]) {
+    for (const [i, spec] of specs.entries()) {
+      await storage().put(
+        'records',
+        bareRecord({
+          id: `r${i}`,
+          merchant: spec.merchant,
+          amount: spec.amount ?? 100,
+          pendingReasons: spec.reasons ?? ['no_category_match'],
+        }),
+      )
+    }
+    return open()
+  }
+
+  function buttonOf(section: Section, text: string) {
+    const found = section.findAll<HTMLButtonElement>('button').find((b) => b.text().trim() === text)
+    if (!found) throw new Error(`找不到按鈕「${text}」`)
+    return found
+  }
+
+  const checkbox = (section: Section) => section.find<HTMLInputElement>('input[type="checkbox"]')
+  const bar = (wrapper: VueWrapper) => wrapper.find('.bar')
+  const barSelect = (wrapper: VueWrapper) => wrapper.find<HTMLSelectElement>('.bar select')
+  const barButtons = (wrapper: VueWrapper) =>
+    bar(wrapper).findAll<HTMLButtonElement>('button')
+  const records = async () => storage().getAll<SpendRecord>('records')
+
+  /** 卡住 run() 結束前那次 refreshRecords 的 getAll，busyId 就停在處理中，直到 gate.resolve()。 */
+  function holdRecordsRefresh() {
+    const gate = deferred<void>()
+    const real = IDBObjectStore.prototype.getAll
+    vi.spyOn(IDBObjectStore.prototype, 'getAll').mockImplementation(function (
+      this: IDBObjectStore,
+      ...args: Parameters<IDBObjectStore['getAll']>
+    ) {
+      const request = real.apply(this, args)
+      if (this.name !== 'records') return request
+      let handler: IDBRequest['onsuccess'] = null
+      Object.defineProperty(request, 'onsuccess', {
+        configurable: true,
+        get: () =>
+          function (this: IDBRequest, ev: Event) {
+            void gate.promise.then(() => handler?.call(this, ev))
+          },
+        set: (fn: IDBRequest['onsuccess']) => {
+          handler = fn
+        },
+      })
+      return request
+    })
+    return gate
+  }
+
+  async function enterSelecting(wrapper: VueWrapper) {
+    await button(wrapper, '選取').trigger('click')
+  }
+
+  async function tick(wrapper: VueWrapper, merchant: string) {
+    await checkbox(card(wrapper, merchant)).setValue(true)
+  }
+
+  it('按「選取」才出現勾選框；有其他原因的卡不能勾並說明', async () => {
+    const pending = await seedPending([
+      { merchant: '甲店' },
+      { merchant: '缺店', reasons: ['no_category_match', 'missing_merchant'] },
+    ])
+    expect(pending.findAll('input[type="checkbox"]')).toHaveLength(0)
+
+    await enterSelecting(pending)
+
+    expect(checkbox(card(pending, '甲店')).element.disabled).toBe(false)
+    expect(checkbox(card(pending, '缺店')).element.disabled).toBe(true)
+    expect(card(pending, '缺店').text()).toContain('還有其他待確認原因，請個別處理')
+    expect(card(pending, '甲店').text()).not.toContain('還有其他待確認原因')
+  })
+
+  it('勾兩筆、選類別、確認 → 兩張卡消失，另一張還在', async () => {
+    const pending = await seedPending([
+      { merchant: '甲店', amount: 100 },
+      { merchant: '乙店', amount: 50 },
+      { merchant: '丙店' },
+    ])
+    await enterSelecting(pending)
+    await tick(pending, '甲店')
+    await tick(pending, '乙店')
+    expect(bar(pending).text()).toContain('已選 2 筆 · $150')
+    await barSelect(pending).setValue('fun')
+    await button(pending, '確認 2 筆為 娛樂').trigger('click')
+    await waitForText(pending, '已確認 2 筆為 娛樂')
+    await settled(pending)
+
+    expect(pending.findAll('section').map((s) => s.find('.merchant').text())).toEqual(['丙店'])
+    expect(pendingRecords.value).toHaveLength(1)
+    const saved = await records()
+    expect(saved.filter((r) => r.status === 'confirmed').map((r) => [r.merchant, r.categoryId]).sort()).toEqual([
+      ['乙店', 'fun'],
+      ['甲店', 'fun'],
+    ])
+    expect(bar(pending).exists()).toBe(false)
+  })
+
+  it('勾選期間有一筆被別處刪掉 → 告知略過幾筆', async () => {
+    const pending = await seedPending([{ merchant: '甲店' }, { merchant: '乙店' }])
+    await enterSelecting(pending)
+    await tick(pending, '甲店')
+    await tick(pending, '乙店')
+    await barSelect(pending).setValue('fun')
+    await storage().delete('records', 'r1')
+    await button(pending, '確認 2 筆為 娛樂').trigger('click')
+
+    await waitForText(pending, '已確認 1 筆為 娛樂，1 筆已被處理，略過')
+  })
+
+  it('沒勾時沒有底部列；沒選類別時確認鈕停用', async () => {
+    const pending = await seedPending([{ merchant: '甲店' }])
+    await enterSelecting(pending)
+    expect(bar(pending).exists()).toBe(false)
+
+    await tick(pending, '甲店')
+    const confirm = () => barButtons(pending).find((b) => b.text().startsWith('確認'))!
+    expect(confirm().element.disabled).toBe(true)
+
+    await barSelect(pending).setValue('fun')
+    expect(confirm().element.disabled).toBe(false)
+  })
+
+  it('卡片展開修改表單 → 不能勾；已勾的卡開始修改 → 自動取消勾選', async () => {
+    const pending = await seedPending([{ merchant: '甲店' }, { merchant: '乙店' }])
+    await enterSelecting(pending)
+    await tick(pending, '甲店')
+    expect(bar(pending).text()).toContain('已選 1 筆')
+
+    await buttonOf(card(pending, '甲店'), '修改').trigger('click')
+    expect(bar(pending).exists()).toBe(false)
+    expect(checkbox(card(pending, '甲店')).element.disabled).toBe(true)
+    expect(card(pending, '甲店').text()).toContain('這張卡有未完成的操作，完成或取消後才能勾選')
+
+    await buttonOf(card(pending, '乙店'), '修改').trigger('click')
+    expect(checkbox(card(pending, '乙店')).element.disabled).toBe(true)
+  })
+
+  it('「全選可勾的」只勾合格且沒有未完成流程的卡', async () => {
+    const pending = await seedPending([
+      { merchant: '甲店' },
+      { merchant: '乙店' },
+      { merchant: '缺店', reasons: ['no_category_match', 'missing_merchant'] },
+    ])
+    await buttonOf(card(pending, '乙店'), '修改').trigger('click')
+    await enterSelecting(pending)
+    await button(pending, '全選可勾的').trigger('click')
+
+    expect(checkbox(card(pending, '甲店')).element.checked).toBe(true)
+    expect(checkbox(card(pending, '乙店')).element.checked).toBe(false)
+    expect(checkbox(card(pending, '缺店')).element.checked).toBe(false)
+    expect(bar(pending).text()).toContain('已選 1 筆')
+  })
+
+  it('「完成」離開選取模式並清掉勾選', async () => {
+    const pending = await seedPending([{ merchant: '甲店' }])
+    await enterSelecting(pending)
+    await tick(pending, '甲店')
+    await button(pending, '完成').trigger('click')
+
+    expect(pending.findAll('input[type="checkbox"]')).toHaveLength(0)
+    expect(bar(pending).exists()).toBe(false)
+    await enterSelecting(pending)
+    expect(checkbox(card(pending, '甲店')).element.checked).toBe(false)
+  })
+
+  it('批次寫入中，所有卡片的動作都停用', async () => {
+    const pending = await seedPending([{ merchant: '甲店' }, { merchant: '乙店' }])
+    await enterSelecting(pending)
+    await tick(pending, '甲店')
+    await barSelect(pending).setValue('fun')
+
+    const gate = holdRecordsRefresh()
+    try {
+      await button(pending, '確認 1 筆為 娛樂').trigger('click')
+      const other = card(pending, '乙店')
+      await vi.waitFor(() => expect(buttonOf(other, '修改').element.disabled).toBe(true))
+
+      expect(buttonOf(other, '刪除這筆').element.disabled).toBe(true)
+      const confirms = other.findAll<HTMLButtonElement>('button').filter((b) => b.text().startsWith('確認'))
+      expect(confirms).not.toHaveLength(0)
+      expect(confirms.every((b) => b.element.disabled)).toBe(true)
+      expect(other.find<HTMLSelectElement>('select').element.disabled).toBe(true)
+    } finally {
+      gate.resolve()
+    }
+    await waitForText(pending, '已確認 1 筆為 娛樂')
+  })
+
+  it('別張卡單筆處理中：底部確認鈕與勾選框停用', async () => {
+    const pending = await seedPending([{ merchant: '甲店' }, { merchant: '乙店' }])
+    await enterSelecting(pending)
+    await tick(pending, '甲店')
+    await barSelect(pending).setValue('fun')
+
+    const gate = holdRecordsRefresh()
+    try {
+      const single = card(pending, '乙店')
+        .findAll<HTMLButtonElement>('button')
+        .find((b) => b.text().startsWith('確認（目前為'))!
+      await single.trigger('click')
+      const confirm = () => barButtons(pending).find((b) => b.text().startsWith('確認'))!
+      await vi.waitFor(() => expect(confirm().element.disabled).toBe(true))
+      expect(checkbox(card(pending, '甲店')).element.disabled).toBe(true)
+      expect(barSelect(pending).element.disabled).toBe(true)
+    } finally {
+      gate.resolve()
+    }
+    await settled(pending)
+  })
+
+  it('待確認清空就離開選取模式：之後再出現的卡沒有勾選框', async () => {
+    const pending = await seedPending([{ merchant: '甲店' }])
+    await enterSelecting(pending)
+    await tick(pending, '甲店')
+    await barSelect(pending).setValue('fun')
+    await button(pending, '確認 1 筆為 娛樂').trigger('click')
+    await waitForText(pending, '已確認 1 筆為 娛樂')
+
+    await storage().put('records', bareRecord({ id: 'later', merchant: '後來店', pendingReasons: ['no_category_match'] }))
+    await refreshRecords()
+    await waitForText(pending, '後來店')
+
+    expect(pending.findAll('input[type="checkbox"]')).toHaveLength(0)
+    expect(button(pending, '選取').exists()).toBe(true)
+  })
+
+  it('寫入失敗 → 說明資料未變更，勾選保留', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const pending = await seedPending([{ merchant: '甲店' }, { merchant: '乙店' }])
+    await enterSelecting(pending)
+    await tick(pending, '甲店')
+    await tick(pending, '乙店')
+    await barSelect(pending).setValue('fun')
+    const real = IDBObjectStore.prototype.put
+    let calls = 0
+    vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(function (
+      this: IDBObjectStore,
+      ...args: Parameters<IDBObjectStore['put']>
+    ) {
+      calls++
+      if (calls === 2) throw new DOMException('quota', 'QuotaExceededError')
+      return real.apply(this, args)
+    })
+    await button(pending, '確認 2 筆為 娛樂').trigger('click')
+    await waitForText(pending, '批次確認失敗，資料未變更')
+    vi.restoreAllMocks()
+
+    expect(bar(pending).text()).toContain('已選 2 筆')
+    expect((await records()).every((r) => r.status === 'pending')).toBe(true)
+    clearErrors()
+  })
+
+  it('0 筆待確認時沒有「選取」鈕', async () => {
+    const pending = await open()
+
+    expect(pending.findAll('button').map((b) => b.text())).not.toContain('選取')
+  })
 })

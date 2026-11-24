@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref, shallowRef } from 'vue'
+import { computed, onMounted, ref, shallowRef, watch } from 'vue'
 import { getStorage } from '@/storage'
 import type { PendingReason, SpendRecord } from '@/models/types'
 import { NO_MERCHANT } from '@/models/labels'
@@ -13,11 +13,15 @@ import { useThumbnails } from '@/composables/useThumbnails'
 import {
   computeRecordUpdate,
   deleteRecord,
+  confirmPendingBatch,
   learnItemRule,
+  onlyCategoryReasons,
   resolvePending,
 } from '@/services/entryService'
 import { handleError } from '@/errors/handleError'
 import { DATE_CONFLICT, formFrom, formToPatch, type RecordForm } from '@/views/recordForm'
+
+const BULK = '__bulk__'
 
 interface Edit {
   record: SpendRecord
@@ -39,6 +43,9 @@ const forms = ref<Record<string, RecordForm>>({})
 const edits = shallowRef<Record<string, Edit>>({})
 /** 逐項面板的品項類別草稿，index 對應 working(r).items。 */
 const itemDrafts = shallowRef<Record<string, (string | null)[]>>({})
+const selecting = ref(false)
+const selected = ref<Set<string>>(new Set())
+const bulkCategory = ref('')
 const thumbs = useThumbnails(() => pendingRecords.value.map((r) => r.photoId))
 
 onMounted(refreshRecords)
@@ -120,7 +127,65 @@ function learnedText(pattern: string, categoryId: string): string {
   return `已記住：${pattern} → ${categoryName.value(categoryId)}（可在設定 › 規則中刪除）`
 }
 
-async function run(id: string, fn: () => Promise<void>) {
+const cardBusy = (r: SpendRecord) => busyId.value === r.id || busyId.value === BULK
+
+/** 卡上有未完成的流程：就地編輯的草稿、展開中的表單、逐項面板。批次確認會丟掉它們，所以不讓勾。 */
+function hasOpenWork(id: string): boolean {
+  return id in edits.value || id in forms.value || perItemFor.value.has(id) || id in itemDrafts.value
+}
+
+const pickable = (r: SpendRecord) => onlyCategoryReasons(r) && !hasOpenWork(r.id)
+
+// 勾選永遠是看得到、而且還能批次的：卡片消失、或後來開始編輯，就移出勾選
+watch(
+  [pendingRecords, edits, forms, perItemFor, itemDrafts],
+  () => {
+    const ok = new Set(pendingRecords.value.filter(pickable).map((r) => r.id))
+    selected.value = new Set([...selected.value].filter((id) => ok.has(id)))
+    if (pendingRecords.value.length === 0) selecting.value = false
+  },
+  { deep: true },
+)
+
+const picked = computed(() => pendingRecords.value.filter((r) => selected.value.has(r.id)))
+const pickedTotal = computed(() => picked.value.reduce((sum, r) => sum + r.amount, 0))
+const showBar = computed(() => selecting.value && picked.value.length > 0)
+
+function toggle(id: string) {
+  const next = new Set(selected.value)
+  if (!next.delete(id)) next.add(id)
+  selected.value = next
+}
+
+function selectAllPickable() {
+  selected.value = new Set(pendingRecords.value.filter(pickable).map((r) => r.id))
+}
+
+function exitSelecting() {
+  selecting.value = false
+  selected.value = new Set()
+}
+
+function confirmPicked() {
+  const ids = picked.value.map((r) => r.id)
+  const categoryId = bulkCategory.value
+  if (ids.length === 0 || !categoryId) return
+  return run(
+    BULK,
+    async () => {
+      const out = await confirmPendingBatch(storage, ids, categoryId)
+      for (const id of ids) forget(id)
+      selected.value = new Set()
+      const name = categoryName.value(categoryId)
+      notice.value = out.skipped
+        ? `已確認 ${out.confirmed} 筆為 ${name}，${out.skipped} 筆已被處理，略過`
+        : `已確認 ${out.confirmed} 筆為 ${name}`
+    },
+    '批次確認失敗，資料未變更',
+  )
+}
+
+async function run(id: string, fn: () => Promise<void>, failed = '操作失敗') {
   if (busyId.value) return
   busyId.value = id
   errorMsg.value = null
@@ -131,7 +196,7 @@ async function run(id: string, fn: () => Promise<void>) {
   } catch (err) {
     errorMsg.value = handleError(err, {
       where: 'PendingView.run',
-      failed: '操作失敗',
+      failed,
       conflict: DATE_CONFLICT,
     })
   } finally {
@@ -198,17 +263,39 @@ function remove(record: SpendRecord) {
 </script>
 
 <template>
-  <main class="page">
+  <main class="page" :class="{ 'with-bar': showBar }">
     <h1>待確認</h1>
 
     <p v-if="pendingRecords.length === 0" class="hint">
       沒有待確認的紀錄。系統不會亂猜類別，判斷不出來的都會留在這裡。
     </p>
 
+    <div v-if="pendingRecords.length > 0" class="toolbar">
+      <template v-if="selecting">
+        <button class="btn-text" :disabled="busyId === BULK" @click="selectAllPickable">
+          全選可勾的
+        </button>
+        <button class="btn-text" :disabled="busyId === BULK" @click="exitSelecting">完成</button>
+      </template>
+      <button v-else class="btn-text" @click="selecting = true">選取</button>
+    </div>
+
     <p v-if="errorMsg" class="result warn">{{ errorMsg }}</p>
     <p v-if="notice" class="result ok">{{ notice }}</p>
 
     <section v-for="r in pendingRecords" :key="r.id" class="panel">
+      <template v-if="selecting">
+        <input
+          type="checkbox"
+          class="pick"
+          :aria-label="`選取 ${working(r).merchant || NO_MERCHANT}`"
+          :checked="selected.has(r.id)"
+          :disabled="!pickable(r) || busyId !== null"
+          @change="toggle(r.id)"
+        />
+        <p v-if="!onlyCategoryReasons(r)" class="hint">還有其他待確認原因，請個別處理</p>
+        <p v-else-if="hasOpenWork(r.id)" class="hint">這張卡有未完成的操作，完成或取消後才能勾選</p>
+      </template>
       <div class="row">
         <span class="merchant">{{ working(r).merchant || NO_MERCHANT }}</span>
         <span class="amount">${{ working(r).amount }}</span>
@@ -229,7 +316,7 @@ function remove(record: SpendRecord) {
         <span class="hint">已修改，按確認才會存</span>
         <button
           class="btn-text"
-          :disabled="busyId === r.id || perItemFor.has(r.id)"
+          :disabled="cardBusy(r) || perItemFor.has(r.id)"
           @click="discardEdit(r.id)"
         >
           放棄修改
@@ -239,11 +326,11 @@ function remove(record: SpendRecord) {
       <div v-if="forms[r.id]" class="edit-form">
         <label class="field">
           <span>日期</span>
-          <input v-model="forms[r.id]!.date" type="date" :disabled="busyId === r.id" />
+          <input v-model="forms[r.id]!.date" type="date" :disabled="cardBusy(r)" />
         </label>
         <label class="field">
           <span>店家</span>
-          <input v-model="forms[r.id]!.merchant" type="text" :disabled="busyId === r.id" />
+          <input v-model="forms[r.id]!.merchant" type="text" :disabled="cardBusy(r)" />
         </label>
         <label class="field">
           <span>金額</span>
@@ -252,7 +339,7 @@ function remove(record: SpendRecord) {
             type="number"
             inputmode="numeric"
             step="1"
-            :disabled="busyId === r.id"
+            :disabled="cardBusy(r)"
           />
         </label>
         <label class="field">
@@ -261,18 +348,18 @@ function remove(record: SpendRecord) {
             v-model="forms[r.id]!.itemsText"
             rows="3"
             placeholder="一行一個品項"
-            :disabled="busyId === r.id"
+            :disabled="cardBusy(r)"
           />
         </label>
         <label class="field">
           <span>備註</span>
-          <input v-model="forms[r.id]!.note" type="text" :disabled="busyId === r.id" />
+          <input v-model="forms[r.id]!.note" type="text" :disabled="cardBusy(r)" />
         </label>
         <div class="actions">
-          <button class="btn-primary" :disabled="busyId === r.id" @click="applyEdit(r)">
+          <button class="btn-primary" :disabled="cardBusy(r)" @click="applyEdit(r)">
             完成修改
           </button>
-          <button class="btn-text" :disabled="busyId === r.id" @click="cancelEdit(r.id)">
+          <button class="btn-text" :disabled="cardBusy(r)" @click="cancelEdit(r.id)">
             取消修改
           </button>
         </div>
@@ -280,7 +367,7 @@ function remove(record: SpendRecord) {
       <button
         v-else
         class="btn-text"
-        :disabled="busyId === r.id || perItemFor.has(r.id)"
+        :disabled="cardBusy(r) || perItemFor.has(r.id)"
         @click="startEdit(r)"
       >
         修改
@@ -294,7 +381,7 @@ function remove(record: SpendRecord) {
         <span>類別</span>
         <select
           :value="draftOf(r)"
-          :disabled="busyId === r.id"
+          :disabled="cardBusy(r)"
           @change="setDraft(r.id, ($event.target as HTMLSelectElement).value)"
         >
           <option value="" disabled>請選擇</option>
@@ -313,7 +400,7 @@ function remove(record: SpendRecord) {
           <span>{{ item.name }}</span>
           <select
             :value="itemDraftOf(r, i)"
-            :disabled="busyId === r.id"
+            :disabled="cardBusy(r)"
             @change="setItemCategory(r, i, ($event.target as HTMLSelectElement).value)"
           >
             <option value="" disabled>請選擇</option>
@@ -325,14 +412,14 @@ function remove(record: SpendRecord) {
         <div class="actions">
           <button
             class="btn-primary"
-            :disabled="busyId === r.id || r.id in forms"
+            :disabled="cardBusy(r) || r.id in forms"
             @click="resolve(r, false)"
           >
             完成並確認
           </button>
           <button
             class="btn-text"
-            :disabled="busyId === r.id || r.id in forms"
+            :disabled="cardBusy(r) || r.id in forms"
             @click="resolve(r, true, true)"
           >
             略過，只記住店家（並確認）
@@ -343,14 +430,14 @@ function remove(record: SpendRecord) {
       <div v-else class="actions">
         <button
           class="btn-primary"
-          :disabled="busyId === r.id || r.id in forms"
+          :disabled="cardBusy(r) || r.id in forms"
           @click="resolve(r, false)"
         >
           確認（目前為 {{ categoryName(draftOf(r) || null) }}）
         </button>
         <button
           class="btn-text"
-          :disabled="busyId === r.id || r.id in forms || !draftOf(r)"
+          :disabled="cardBusy(r) || r.id in forms || !draftOf(r)"
           @click="resolve(r, true)"
         >
           確認並記住規則
@@ -361,7 +448,7 @@ function remove(record: SpendRecord) {
         <button
           v-if="confirmingDelete !== r.id"
           class="btn-text"
-          :disabled="busyId === r.id"
+          :disabled="cardBusy(r)"
           @click="confirmingDelete = r.id"
         >
           刪除這筆
@@ -369,16 +456,71 @@ function remove(record: SpendRecord) {
         <div v-else class="delete-confirm">
           <span class="warn">確定刪除？無法復原。</span>
           <button class="btn-text" @click="confirmingDelete = null">取消</button>
-          <button class="btn-text danger" :disabled="busyId === r.id" @click="remove(r)">
+          <button class="btn-text danger" :disabled="cardBusy(r)" @click="remove(r)">
             確定刪除
           </button>
         </div>
       </div>
     </section>
+
+    <div v-if="showBar" class="bar" role="status">
+      <p>已選 {{ picked.length }} 筆 · ${{ pickedTotal }}</p>
+      <label class="field">
+        <span>類別</span>
+        <select v-model="bulkCategory" :disabled="busyId !== null">
+          <option value="" disabled>請選擇</option>
+          <option v-for="c in activeCategories" :key="c.id" :value="c.id">
+            {{ c.icon }} {{ c.name }}
+          </option>
+        </select>
+      </label>
+      <button
+        class="btn-primary bar-confirm"
+        :disabled="busyId !== null || !bulkCategory"
+        @click="confirmPicked"
+      >
+        確認 {{ picked.length }} 筆為 {{ categoryName(bulkCategory || null) }}
+      </button>
+    </div>
   </main>
 </template>
 
 <style scoped>
+.toolbar {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-3);
+}
+
+.pick {
+  width: 20px;
+  height: 20px;
+}
+
+/* 和 RecordsView 的 .with-bar／.bar 重複，等第三處用到再抽共用。
+   這裡的底部列有三層（已選、類別、確認），比紀錄頁高，留白要多一些，最後一張卡才不會被蓋住 */
+.page.with-bar {
+  padding-bottom: calc(var(--safe-bottom) + 72px + 170px + 16px);
+}
+
+.bar {
+  position: fixed;
+  left: var(--space-4);
+  right: var(--space-4);
+  bottom: calc(var(--safe-bottom) + 72px);
+  max-height: 60vh;
+  overflow-y: auto;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius);
+  background: var(--c-surface);
+  font-size: 14px;
+}
+
+.bar-confirm {
+  margin-top: var(--space-3);
+}
+
 .row {
   display: flex;
   justify-content: space-between;

@@ -12,7 +12,7 @@
 ## 現況
 
 **v1 功能全部完成，Phase 1–9 的程式都已寫完並通過真機驗收**，站台上線中，
-712 個測試（2026-11-24）、lint 乾淨。最後一塊（拍發票自動帶入品項）於 2026-10-11 完成。
+729 個測試（2026-11-24）、lint 乾淨。最後一塊（拍發票自動帶入品項）於 2026-10-11 完成。
 
 接下來**不需要再寫新功能**，需要的是用真實資料驗收與校準：Phase 9b 的欄位
 解析已有 2 張合規發票解析正確（其中 1 張走過記一筆）、`invoiceKey` 已在載具匯入時確認；分析門檻則還是憑常識設的預設值。
@@ -69,6 +69,7 @@
 | hardening | 還原時逐筆驗證備份內容；CSV 文字欄位加公式前綴；文件對齊現況 | ✅ | ✅ | 2026-11-24 真機驗收通過：匯出最新完整備份後選回該檔，預覽正常（真實資料沒有被新驗證擋下）；匯出 CSV 用 Numbers 開，一般資料正常 |
 | month-overview | 紀錄頁頂端「本月」總覽：筆數、總額、其中幾筆待確認、各類別小計 | ✅ | ✅ | 2026-11-24 真機驗收通過：紀錄頁頂端出現「本月 · 11 月」、筆數與總額對得上、待確認那行與類別小計正常、搜尋與選取時數字不變、間距可接受 |
 | import-backup-hint | 匯入載具 CSV 完成後提示順手完整備份 | ✅ | ✅ | 2026-11-24 真機驗收通過：匯入一份 CSV 後底部訊息有提示；按完整備份後提示消失 |
+| pending-bulk-confirm | 待確認頁多選後一次指定類別並確認，不學規則 | ✅ | ⏳ | 待真機驗收：匯入載具 CSV 後進待確認頁，選取、全選可勾的、選類別、確認 N 筆；有缺店家的卡勾不了；寫入中按鈕停用 |
 
 ---
 
@@ -477,6 +478,7 @@ v1 的程式寫完了。接下來最有價值的不是寫功能，是**讓真實
 | **hardening** ✅ | `readBackup` 逐筆驗證：manifest 是物件且 `formatVersion` 整數；紀錄的 `id`／`date`（存在的日期）／`merchant`／`amount`（整數 ≥ 0）／`items` 與品名／`categoryId`／`categorySource`／`classifyConfidence`／`status`／`pendingReasons`／`invoiceNumber`／`invoicePeriod`／`invoiceKey`／`note`，且 `invoiceKey`、`invoicePeriod` 要和 `buildInvoiceKey(date, invoiceNumber)` 一致；規則、類別、照片 meta 的必要欄位。壞一筆整份拒收，訊息指出第幾筆、哪個欄位，在保險備份與寫入之前。B2（`4e78b85`）「接受的風險：備份只驗證結構」的觸發點（支援手改備份檔）就此處理。CSV 的店家、品項、類別、備註，以及 `categorySource`、`status`（手改備份可塞任意字串）以 `=` `+` `-` `@` tab CR 開頭時補 `'`。改 `backup.test.ts`、`BackupView.test.ts` 兩份 fixture 成完整且 key 一致的紀錄（使用者同意，斷言不改） | 不驗 enum 成員、`createdAt`／`updatedAt`／`sourceType`、settings（`migrateSettings` 每次開啟補鍵）；B2 之前「有號碼＋不存在日期」的舊紀錄會被擋（機率極低）；重複 `id`、settings 缺 `key` 已評估、不做；`'` 在試算表是否可見待真機確認 |
 | **month-overview** ✅ | 紀錄頁頂端「本月 · N 月」總覽：筆數、總額、其中 N 筆待確認、各類別小計（金額大到小、同額依 `sortOrder`、0 元類別不列）；純函式 `summarizeMonth`（`src/views/monthSummary.ts`），月份比對重用 `monthKey`；不受搜尋與選取影響，本月無紀錄顯示「本月還沒有紀錄」，App 無紀錄不顯示；標題帶月份、待確認那行純文字、金額不加千分位（使用者 2026-11-24 同意草圖與三個選項） | 頁面開著跨午夜不換月；不做月份切換；整頁金額格式不一致另記 ticket |
 | **import-backup-hint** ✅ | `confirmImport` 在 zip 組好時，成功訊息後面接「資料剛更新，建議往上捲按「完整備份（zip）」存一份。」；附在 `message` 上，按匯出或備份時被覆蓋；zip 組檔失敗不提示 | research 的「有新增或合併才提示」是死條件（`writes.length === inserted + merged`，0 筆時確認鈕停用），使用者同意拿掉；訊息位置維持頁面底部 |
+| **pending-bulk-confirm** ✅ | 待確認頁「選取」模式：勾選後在底部列選類別，`confirmPendingBatch` 單一 transaction 讀 DB 當下值、逐筆判斷 `onlyCategoryReasons`（原因全是分類原因）才寫，類別有變才改來源為 `user`、信心 1，不學規則、不動 items 與 hitCount；有其他原因或未完成修改的卡不能勾；批次寫入時用 `BULK` 鎖住所有卡片動作；失敗「批次確認失敗，資料未變更」勾選保留 | 使用者 2026-11-24 作廢 REVIEW C4 的「全部確認（維持目前分類）」（真實 CSV 49 筆待確認 0 筆有類別），改成多選指定類別；`.with-bar`／`.bar` 樣式和 RecordsView 各一份，等第三處再抽 |
 
 另外二十九張 ticket：
 - 返回分析頁時展開與捲動消失：從佐證清單點進一筆再「← 返回」，清單收合、可能回到頁首（沒有 `keep-alive`、`scrollBehavior`）。使用者 2026-10-17 決定接受。觸發點：真機回報看完一筆回來找不到原本那條

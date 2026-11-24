@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, it } from 'vitest'
-import { IDBFactory } from 'fake-indexeddb'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { IDBFactory, IDBObjectStore } from 'fake-indexeddb'
 import type { Photo, RecordItem, Rule, SpendRecord } from '@/models/types'
 import { todayIso } from '@/parsing/quickInput'
 import { addDays } from '@/analysis/dates'
@@ -7,6 +7,7 @@ import { IndexedDbAdapter, seed, StorageConflictError } from '@/storage'
 import { loadActiveRules, seedBuiltinRules } from '@/services/ruleService'
 import {
   computeRecordUpdate,
+  confirmPendingBatch,
   confirmRecord,
   correctCategory,
   createFromText,
@@ -718,5 +719,127 @@ describe('就地編輯的 service（B4.2b-2）', () => {
 
     expect(await learnItemRule(storage, [{ name: '甲甲' }], 5, 'fun')).toBeNull()
     expect(await storage.getAll<Rule>('rules')).toHaveLength(count)
+  })
+})
+
+describe('confirmPendingBatch（pending-bulk-confirm）', () => {
+  const LATER = NOW + 5000
+
+  function pending(id: string, overrides: Partial<SpendRecord> = {}): SpendRecord {
+    return {
+      id,
+      date: '2026-01-01',
+      merchant: `店${id}`,
+      amount: 100,
+      items: [{ name: '甲', qty: 1, unitPrice: null, amount: null, categoryId: null }],
+      categoryId: null,
+      categorySource: 'rule',
+      classifyConfidence: 0,
+      recognizeConfidence: null,
+      status: 'pending',
+      pendingReasons: ['no_category_match'],
+      invoiceNumber: null,
+      invoicePeriod: null,
+      invoiceKey: null,
+      invoiceRandomCode: null,
+      sourceType: 'manual',
+      photoId: null,
+      rawRecognition: null,
+      note: '',
+      createdAt: NOW,
+      updatedAt: NOW,
+      ...overrides,
+    }
+  }
+
+  const byId = async (id: string) => (await storage.get<SpendRecord>('records', id))!
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('三筆合格 → 全部確認並指定類別，items 不動', async () => {
+    for (const id of ['a', 'b', 'c']) await storage.put('records', pending(id))
+
+    const out = await confirmPendingBatch(storage, ['a', 'b', 'c'], 'drink', LATER)
+
+    expect(out).toEqual({ confirmed: 3, skipped: 0 })
+    for (const id of ['a', 'b', 'c']) {
+      expect(await byId(id)).toEqual({
+        ...pending(id),
+        categoryId: 'drink',
+        categorySource: 'user',
+        classifyConfidence: 1,
+        pendingReasons: [],
+        status: 'confirmed',
+        updatedAt: LATER,
+      })
+    }
+  })
+
+  it('已有類別且選同一類 → 只確認，不改來源與信心', async () => {
+    await storage.put(
+      'records',
+      pending('a', {
+        categoryId: 'drink',
+        categorySource: 'rule',
+        classifyConfidence: 0.6,
+        pendingReasons: ['low_confidence'],
+      }),
+    )
+
+    await confirmPendingBatch(storage, ['a'], 'drink', LATER)
+
+    expect(await byId('a')).toMatchObject({
+      status: 'confirmed',
+      categoryId: 'drink',
+      categorySource: 'rule',
+      classifyConfidence: 0.6,
+      pendingReasons: [],
+    })
+  })
+
+  it('已不存在、已確認、多了非分類原因的都跳過', async () => {
+    await storage.put('records', pending('ok'))
+    await storage.put('records', pending('done', { status: 'confirmed', pendingReasons: [] }))
+    await storage.put('records', pending('mixed', { pendingReasons: ['no_category_match', 'missing_merchant'] }))
+
+    const out = await confirmPendingBatch(storage, ['ok', 'gone', 'done', 'mixed'], 'drink', LATER)
+
+    expect(out).toEqual({ confirmed: 1, skipped: 3 })
+    expect(await byId('ok')).toMatchObject({ status: 'confirmed', categoryId: 'drink' })
+    expect(await byId('done')).toEqual(pending('done', { status: 'confirmed', pendingReasons: [] }))
+    expect(await byId('mixed')).toEqual(
+      pending('mixed', { pendingReasons: ['no_category_match', 'missing_merchant'] }),
+    )
+  })
+
+  it('不學規則、不動 hitCount', async () => {
+    await storage.put('records', pending('a'))
+    await storage.put('records', pending('b'))
+    const before = await storage.getAll<Rule>('rules')
+
+    await confirmPendingBatch(storage, ['a', 'b'], 'drink', LATER)
+
+    expect(await storage.getAll<Rule>('rules')).toEqual(before)
+  })
+
+  it('寫到一半失敗 → 三筆都沒變', async () => {
+    for (const id of ['a', 'b', 'c']) await storage.put('records', pending(id))
+    const real = IDBObjectStore.prototype.put
+    let calls = 0
+    vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(function (
+      this: IDBObjectStore,
+      ...args: Parameters<IDBObjectStore['put']>
+    ) {
+      calls++
+      if (calls === 2) throw new DOMException('quota', 'QuotaExceededError')
+      return real.apply(this, args)
+    })
+
+    await expect(confirmPendingBatch(storage, ['a', 'b', 'c'], 'drink', LATER)).rejects.toThrow()
+    vi.restoreAllMocks()
+
+    for (const id of ['a', 'b', 'c']) expect(await byId(id)).toEqual(pending(id))
   })
 })

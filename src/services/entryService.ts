@@ -123,6 +123,46 @@ const CATEGORY_REASONS: PendingReason[] = [
   'low_confidence',
 ]
 
+/** 只剩「指定類別就會解除」的原因：批次確認只處理這種，其他原因要使用者逐張看過。 */
+export function onlyCategoryReasons(r: SpendRecord): boolean {
+  return r.status === 'pending' && r.pendingReasons.every((x) => CATEGORY_REASONS.includes(x))
+}
+
+export interface BatchConfirmResult {
+  confirmed: number
+  /** 已不存在、已不是待確認、或已不合格（期間被別處改過） */
+  skipped: number
+}
+
+/**
+ * 多選後一次指定類別並確認（pending-bulk-confirm）。不學規則：多品項整筆改類別不自動學（§6.2）、
+ * 超商不設店家規則（§3.3）。單一 transaction，讀 DB 當下的值，期間被改過的跳過。
+ */
+export async function confirmPendingBatch(
+  storage: StoragePort,
+  ids: string[],
+  categoryId: string,
+  now = Date.now(),
+): Promise<BatchConfirmResult> {
+  return storage.transaction(['records'], async (tx) => {
+    let confirmed = 0
+    for (const id of ids) {
+      const current = await tx.get<SpendRecord>('records', id)
+      if (!current || !onlyCategoryReasons(current)) continue
+      const changed = current.categoryId !== categoryId
+      await tx.put('records', {
+        ...current,
+        ...(changed ? { categoryId, categorySource: 'user' as const, classifyConfidence: 1 } : {}),
+        pendingReasons: [],
+        status: 'confirmed',
+        updatedAt: now,
+      })
+      confirmed++
+    }
+    return { confirmed, skipped: ids.length - confirmed }
+  })
+}
+
 /** 套用分類結果：舊的分類原因換成新的，其他原因保留。呼叫端負責「使用者指定的類別不重跑」。 */
 export function applyClassification(record: SpendRecord, out: Classified): SpendRecord {
   const pendingReasons = [
