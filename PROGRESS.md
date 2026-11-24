@@ -66,7 +66,7 @@
 | bulk-delete | 紀錄頁多選刪除，刪除前強制存保險備份 | ✅ | ✅ | 2026-10-26 真機驗收通過：勾選與點整列、全選目前結果、底部列不被分頁列蓋住、確認區塊文案與捲動、iOS 分享保險備份與取消、刪除後回饋與紅點、用保險備份還原。「改搜尋關鍵字後勾選清空」用中文輸入法時勾勾似乎仍在，jsdom（含模擬組字）重現不出來，記 ticket 待重現 |
 | prepare-files | 備份頁匯入或還原後重組匯出檔失敗時，不再能匯出重組前的舊檔 | ✅ | ✅ | 2026-10-29 真機驗收通過：進備份頁兩鈕可匯出、匯入載具 CSV 後匯出的 CSV 含匯入的紀錄、完整備份存檔成功且上次備份更新。組檔失敗的情境由頁面測試與突變 M1–M8 涵蓋 |
 | record-edit-categories | 直接開啟編輯頁（例如在編輯頁按「有新版本 → 更新」）時，類別選單是空的、目前類別顯示 id | ✅ | ✅ | 2026-10-29 真機驗收通過：停在編輯頁按「有新版本 → 更新」後仍在編輯頁，目前類別顯示名稱、選單可改分類且寫入；從紀錄頁進編輯頁改分類正常 |
-| hardening | 還原時逐筆驗證備份內容；CSV 文字欄位加公式前綴；文件對齊現況 | ✅ | ⏳ | 真機驗收：匯出最新完整備份後選回該檔能預覽；匯出 CSV 用 Numbers 開，一般資料正常 |
+| hardening | 還原時逐筆驗證備份內容；CSV 文字欄位加公式前綴；文件對齊現況 | ✅ | ✅ | 2026-11-24 真機驗收通過：匯出最新完整備份後選回該檔，預覽正常（真實資料沒有被新驗證擋下）；匯出 CSV 用 Numbers 開，一般資料正常 |
 
 ---
 
@@ -472,7 +472,7 @@ v1 的程式寫完了。接下來最有價值的不是寫功能，是**讓真實
 | **bulk-delete** ✅ | 紀錄頁「選取」模式：逐筆勾選或全選目前搜尋結果，改關鍵字清空勾選；`prepareBulkDelete`／`commitBulkDelete` 讓保險備份在 API 上強制（同還原）；確認區塊列筆數、合計、照片數、發票數與規則不刪；`deleteRecords` 為唯一刪除點，讀 DB 當下的 `photoId`（單筆刪除一併修正快照過期時刪到別筆照片、留下孤兒照片） | 單筆刪除不強制保險備份；依匯入批次撤銷、依月份／來源篩選、`hitCount` 不倒回另記 ticket；merge-provenance、tombstone、規則清單多選刪除已評估、未採用（DECISIONS） |
 | **prepare-files** ✅ | `prepareFiles` 一開始重組就把 `csvFile`／`backupFile` 清成 `null`：組檔失敗的那個檔按鈕停用（原本匯出的是匯入或還原前的舊檔，還會 `markBackedUp`），zip 失敗時新 CSV 仍可匯出；失敗文案改「準備匯出檔失敗，請離開本頁再進來重試」；頁面測試以 `IDBObjectStore.prototype.getAll` 製造失敗 | 不加重試鈕；組檔與匯入／還原重疊另記 ticket |
 | **record-edit-categories** ✅ | 編輯頁 `onMounted` 先 `refreshRecords()` 再讀紀錄：類別清單是 `useRecords` 的模組單例，其他會顯示紀錄或類別的頁進來都會載入，只有編輯頁要等第一次 `act()`，所以更新 App 後重新載入落在 `#/records/:id` 時類別選單是空的、「目前：」顯示 id；refresh 在 try 內，失敗時整頁「讀取失敗」不顯示半套資料。原 flake ticket（`RecordEditView.test.ts` 在 shuffle 下偶發失敗）同一成因：原推測「第一個測試冷啟動超過 1000ms」**已推翻**，真因是排在任何 `act()` 之前的測試拿不到類別。新增「直接開啟」與「類別讀取失敗」頁面測試；「改整筆分類」補斷言類別確實改變（使用者同意）；`otherOption` 找不到選項時說明原因 | 編輯頁多讀一次全部 records（同其他頁）；`act()` 寫入成功但重新整理失敗另記 ticket |
-| **hardening** | `readBackup` 逐筆驗證：manifest 是物件且 `formatVersion` 整數；紀錄的 `id`／`date`（存在的日期）／`merchant`／`amount`（整數 ≥ 0）／`items` 與品名／`categoryId`／`categorySource`／`classifyConfidence`／`status`／`pendingReasons`／`invoiceNumber`／`invoicePeriod`／`invoiceKey`／`note`，且 `invoiceKey`、`invoicePeriod` 要和 `buildInvoiceKey(date, invoiceNumber)` 一致；規則、類別、照片 meta 的必要欄位。壞一筆整份拒收，訊息指出第幾筆、哪個欄位，在保險備份與寫入之前。B2（`4e78b85`）「接受的風險：備份只驗證結構」的觸發點（支援手改備份檔）就此處理。CSV 的店家、品項、類別、備註，以及 `categorySource`、`status`（手改備份可塞任意字串）以 `=` `+` `-` `@` tab CR 開頭時補 `'`。改 `backup.test.ts`、`BackupView.test.ts` 兩份 fixture 成完整且 key 一致的紀錄（使用者同意，斷言不改） | 不驗 enum 成員、`createdAt`／`updatedAt`／`sourceType`、settings（`migrateSettings` 每次開啟補鍵）；B2 之前「有號碼＋不存在日期」的舊紀錄會被擋（機率極低）；重複 `id`、settings 缺 `key` 已評估、不做；`'` 在試算表是否可見待真機確認 |
+| **hardening** ✅ | `readBackup` 逐筆驗證：manifest 是物件且 `formatVersion` 整數；紀錄的 `id`／`date`（存在的日期）／`merchant`／`amount`（整數 ≥ 0）／`items` 與品名／`categoryId`／`categorySource`／`classifyConfidence`／`status`／`pendingReasons`／`invoiceNumber`／`invoicePeriod`／`invoiceKey`／`note`，且 `invoiceKey`、`invoicePeriod` 要和 `buildInvoiceKey(date, invoiceNumber)` 一致；規則、類別、照片 meta 的必要欄位。壞一筆整份拒收，訊息指出第幾筆、哪個欄位，在保險備份與寫入之前。B2（`4e78b85`）「接受的風險：備份只驗證結構」的觸發點（支援手改備份檔）就此處理。CSV 的店家、品項、類別、備註，以及 `categorySource`、`status`（手改備份可塞任意字串）以 `=` `+` `-` `@` tab CR 開頭時補 `'`。改 `backup.test.ts`、`BackupView.test.ts` 兩份 fixture 成完整且 key 一致的紀錄（使用者同意，斷言不改） | 不驗 enum 成員、`createdAt`／`updatedAt`／`sourceType`、settings（`migrateSettings` 每次開啟補鍵）；B2 之前「有號碼＋不存在日期」的舊紀錄會被擋（機率極低）；重複 `id`、settings 缺 `key` 已評估、不做；`'` 在試算表是否可見待真機確認 |
 
 另外二十八張 ticket：
 - 返回分析頁時展開與捲動消失：從佐證清單點進一筆再「← 返回」，清單收合、可能回到頁首（沒有 `keep-alive`、`scrollBehavior`）。使用者 2026-10-17 決定接受。觸發點：真機回報看完一筆回來找不到原本那條
