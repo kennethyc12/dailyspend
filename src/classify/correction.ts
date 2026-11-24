@@ -1,5 +1,5 @@
 import type { Rule, RuleType } from '@/models/types'
-import { basePriority } from './matching'
+import { basePriority, compareRules, ruleMatches } from './matching'
 import { normalizeInput } from '@/parsing/quickInput'
 
 export type CorrectionScope = { kind: 'record' } | { kind: 'item'; index: number }
@@ -21,6 +21,37 @@ export type CorrectionPlan =
   /** 多品項改整筆：不自動學，交回 UI 讓使用者逐項指定（§6.2）。 */
   | { kind: 'needs_per_item'; itemNames: string[] }
   | { kind: 'none'; why: 'no_pattern' }
+
+const COMPANY_MARKERS = ['股份有限公司', '有限公司']
+const MIN_BRAND_LENGTH = 2
+
+/**
+ * 公司登記全名 → 品牌：載具 CSV 的店家帶分店字樣，用全名學到的規則換一家分店就不命中。
+ * 取兩個字樣中最早出現的位置切掉（先找「有限公司」會留下「…股份」）。
+ * 切完太短就用原字串：2 字品牌用 contains 可能誤命中別家公司的全名，這是已知限制（design §6.2）。
+ */
+export function toBrand(merchant: string): string {
+  // 沒有字樣時 Math.min() 是 Infinity，slice 取整串，結果就是原字串
+  const cut = Math.min(...COMPANY_MARKERS.map((m) => merchant.indexOf(m)).filter((i) => i >= 0))
+  const brand = merchant.slice(0, cut).trim()
+  return brand.length >= MIN_BRAND_LENGTH ? brand : merchant
+}
+
+/**
+ * 已有使用者規則能命中這家店時更新它，而不是另建品牌規則：
+ * 舊的全名規則 pattern 較長，比對時會贏過新的品牌規則（compareRules 依長度），新修正會被吃掉。
+ * ruleMatches 不看 type，所以要自己篩 merchant。
+ */
+function planMerchantRule(input: CorrectionInput, merchant: string, now: number): CorrectionPlan {
+  const hit = input.existingRules
+    .filter((r) => r.type === 'merchant' && r.origin === 'userCorrection' && ruleMatches(r, merchant))
+    .sort(compareRules)[0]
+  if (hit) return { kind: 'update', ruleId: hit.id, categoryId: input.targetCategoryId, updatedAt: now }
+  // 品牌可能剛好等於內建或停用規則的 pattern（例如內建的加油站品牌）：planRule 的 findExisting
+  // 不看 origin／isActive，會改掉那條。只讓它看啟用中的使用者規則，否則另建一條。
+  const own = input.existingRules.filter((r) => r.origin === 'userCorrection' && r.isActive)
+  return planRule({ ...input, existingRules: own }, 'merchant', toBrand(merchant), now)
+}
 
 function findExisting(rules: Rule[], type: RuleType, pattern: string): Rule | undefined {
   const p = normalizeInput(pattern).toLowerCase()
@@ -79,7 +110,7 @@ export function planCorrection(input: CorrectionInput): CorrectionPlan {
 
   if (input.items.length === 0) {
     return input.merchant
-      ? planRule(input, 'merchant', input.merchant, now)
+      ? planMerchantRule(input, input.merchant, now)
       : { kind: 'none', why: 'no_pattern' }
   }
 
@@ -94,6 +125,6 @@ export function planCorrection(input: CorrectionInput): CorrectionPlan {
   }
 
   return input.merchant
-    ? planRule(input, 'merchant', input.merchant, now)
+    ? planMerchantRule(input, input.merchant, now)
     : { kind: 'none', why: 'no_pattern' }
 }

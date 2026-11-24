@@ -170,6 +170,57 @@ describe('確認與確認並記住規則（B4.2a）', () => {
     expect(learned[0]).toMatchObject({ type: 'merchant', pattern: '某店' })
   })
 
+  it('店名是公司全名：記住店家時學品牌，提示顯示品牌', async () => {
+    const pending = await pendingWith('測試超商股份有限公司北區第一分公司 甲甲 乙乙 100')
+    await selectFor(pending, '類別').setValue('fun')
+    await button(pending, '確認並記住規則').trigger('click')
+    await waitForText(pending, '逐項指定')
+    await settled(pending)
+    await button(pending, '略過，只記住店家（並確認）').trigger('click')
+
+    await waitForText(pending, '已記住：測試超商 → 娛樂（可在設定 › 規則中刪除）')
+    expect((await learnedRules()).map((r) => r.pattern)).toEqual(['測試超商'])
+  })
+
+  it('已有這家分店的全名規則：更新它，提示顯示全名', async () => {
+    const full = '測試超商股份有限公司北區第一分公司'
+    await storage().put('rules', {
+      id: 'old-full',
+      type: 'merchant',
+      pattern: full,
+      matchMode: 'contains',
+      categoryId: 'drink',
+      priority: basePriority('merchant', 'userCorrection'),
+      origin: 'userCorrection',
+      isActive: true,
+      hitCount: 0,
+      lastHitAt: null,
+      createdAt: 0,
+      updatedAt: 0,
+    } satisfies Rule)
+    await storage().put(
+      'records',
+      bareRecord({
+        merchant: full,
+        items: [
+          { name: '甲甲', qty: 1, unitPrice: null, amount: null, categoryId: null },
+          { name: '乙乙', qty: 1, unitPrice: null, amount: null, categoryId: null },
+        ],
+      }),
+    )
+    const pending = await open()
+    await selectFor(pending, '類別').setValue('fun')
+    await button(pending, '確認並記住規則').trigger('click')
+    await waitForText(pending, '逐項指定')
+    await settled(pending)
+    await button(pending, '略過，只記住店家（並確認）').trigger('click')
+
+    await waitForText(pending, `已記住：${full} → 娛樂（可在設定 › 規則中刪除）`)
+    const learned = await learnedRules()
+    expect(learned).toHaveLength(1)
+    expect(learned[0]).toMatchObject({ id: 'old-full', categoryId: 'fun' })
+  })
+
   it('沒有店家也沒有品項：照樣確認並說明沒東西可記', async () => {
     const pending = await pendingWith('320')
     await selectFor(pending, '類別').setValue('fun')
