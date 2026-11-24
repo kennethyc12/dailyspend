@@ -14,7 +14,7 @@
 **v1 功能全部完成，Phase 1–9 的程式都已寫完並通過真機驗收**，站台上線中，
 756 個測試（2026-11-25）、lint 乾淨。最後一塊（拍發票自動帶入品項）於 2026-10-11 完成。
 
-接下來**不需要再寫新功能**，需要的是用真實資料驗收與校準：Phase 9b 的欄位
+~~接下來**不需要再寫新功能**~~（2026-11-17 第二次審閱後依使用者的回答又做了五批：還原驗證、月總覽、匯入後備份提示、待確認批次指定類別、店家規則學品牌；2026-11-25 全部真機通過）。仍待用真實資料驗收與校準的：Phase 9b 的欄位
 解析已有 2 張合規發票解析正確（其中 1 張走過記一筆）、`invoiceKey` 已在載具匯入時確認；分析門檻則還是憑常識設的預設值。
 
 ### 狀態總表
@@ -482,9 +482,9 @@ v1 的程式寫完了。接下來最有價值的不是寫功能，是**讓真實
 | **pending-bulk-confirm** ✅ | 待確認頁「選取」模式：勾選後在底部列選類別，`confirmPendingBatch` 單一 transaction 讀 DB 當下值、逐筆判斷 `onlyCategoryReasons`（原因全是分類原因）才寫，類別有變才改來源為 `user`、信心 1，不學規則、不動 items 與 hitCount；有其他原因或未完成修改的卡不能勾；批次寫入時用 `BULK` 鎖住所有卡片動作；失敗「批次確認失敗，資料未變更」勾選保留 | 使用者 2026-11-24 作廢 REVIEW C4 的「全部確認（維持目前分類）」（真實 CSV 49 筆待確認 0 筆有類別），改成多選指定類別；`.with-bar`／`.bar` 樣式和 RecordsView 各一份，等第三處再抽 |
 | **rule-pattern** ✅ | `correction.ts` 店家規則：先找已能命中這家店的使用者店家規則並更新它（避免舊全名規則較長而吃掉新修正），沒有才用 `toBrand`（從「股份有限公司」「有限公司」最早位置切掉，少於 2 字用原字串）建品牌規則；品項規則、比對、`record.merchant` 不動。CSV 推估同品牌重複覆蓋從 41 張到 51 張 | 沒有使用者實際規則資料，收益可能較小；2 字品牌可能誤命中；命中舊全名規則不推廣；既有全名規則不遷移 |
 
-另外三十一張 ticket：
+另外四十張 ticket：
 - 返回分析頁時展開與捲動消失：從佐證清單點進一筆再「← 返回」，清單收合、可能回到頁首（沒有 `keep-alive`、`scrollBehavior`）。使用者 2026-10-17 決定接受。觸發點：真機回報看完一筆回來找不到原本那條
-- 設定頁照片壓縮的無效輸入靜默忽略：`updatePhotoSetting` 在 `value <= 0` 時直接 return、沒有提示，`quality` 大於 1 也接受（B6a 只做分析頁）。觸發點：真機改壞照片參數，或 9b-3 驗收時
+- 設定頁照片壓縮的無效輸入靜默忽略：`updatePhotoSetting` 在 `value <= 0` 時直接 return、沒有提示，`quality` 大於 1 也接受（B6a 只做分析頁）。觸發點：真機改壞照片參數，或 9b-3 驗收時另外：`migrateSettings` 只夾 `thresholds`，`photo.*`、`confidence.pendingBelow`、`backup.remindAfterDays` 沒有範圍，還原手改過的備份（例如 `photo.maxEdge: 1`）會讓之後的照片壞掉（REVIEW-2026-11-17 A5），一起處理
 - 記一筆讀 QR 時 `detectQrCodes` 回 `error`（例如 wasm 載入失敗）：畫面顯示原文、不進錯誤紀錄，「讀取發票失敗」字樣在 `onPickPhoto` 寫了兩次（結果分支與 catch）。觸發點：有人遇到 wasm 載入失敗，或 QrLab 下架時（`detectQrCodes` 兩頁共用，正確修法要改它的回傳；使用者 2026-10-16 決定，2026-10-18 改觸發點）
 - 待確認卡的死角：多品項卡改日期撞到另一張發票的 `invoiceKey`，按「確認並記住規則」展開逐項面板後「完成並確認」會失敗；面板開著時「修改」「放棄修改」停用（避免逐項草稿錯位），卡片上改不回日期，只能離開頁面（草稿全消失）或刪除。使用者 2026-10-15 決定接受。觸發點：有人真的遇到，或要讓逐項面板可以收起時
 - `SettingsView.vue`、`QrLabView.vue` 的 `loadSamples` 在頁面卸載後才 resolve 時，建出的縮圖 object URL 不會被 revoke（小洩漏）。觸發點：QrLab 下架或設定頁樣本區改版時（`useThumbnails` 以 photoId 從 DB 讀縮圖，樣本已帶 `thumbBlob`，不適合硬套）
@@ -507,13 +507,22 @@ v1 的程式寫完了。接下來最有價值的不是寫功能，是**讓真實
 - 重跑時記憶體 settings 被蓋回：`runInit` 的 `settings.value = current` 在 `requestPersist` 之後才執行，這段期間在設定頁改了照片壓縮，記憶體裡的值會被蓋回舊的（DB 是對的）。觸發點：真機回報照片壓縮欄位跳回舊值
 - 備份頁不等初始化：`BackupView` 的 `onMounted(prepareFiles)` 不等 `initStorage`，首次安裝後直接冷啟動進 `/backup` 時，匯出檔可能在 seed 之前就組好。機率極低。觸發點：使用者回報第一次的匯出檔是空的
 - 還原後立刻跳提醒：備份檔裡的 `lastBackupAt` 是匯出前的值（`markBackedUp` 在匯出之後才寫），`restoreBackup` 整份覆蓋 settings，所以用最新備份還原後可能馬上顯示「該備份了」。使用者 2026-10-18 決定接受。觸發點：真機遇到時覺得吵
-- 死 code 清點：`StoragePort.close`（adapter 有實作、正式程式沒呼叫端）、`confirmRecord`（只有 `entryService.test.ts`、`carrierImportService.test.ts`、`RecordsView.test.ts` 在用）、`storage/index.ts` 的 `toIdbRange` 轉出（沒人從 index 匯入）、`runBlobRoundTrip`／`BlobRoundTrip`（Phase 2 真機自檢，沒有呼叫端）、`isStandardInvoiceNumber`（design.md:705 說「只供 UI 提示」，UI 沒接）、`StoragePort.query`／`KeyRange`／`toIdbRange`（只有 `buildCsvFile(range)` 有條件呼叫，UI 從不傳 range；CSV 日期區間使用者 2026-11-17 決定不做）。B7b 不動（使用者 2026-10-18 決定）。觸發點：下一次清理 port 或 storage 介面時
+- 死 code 清點：`StoragePort.close`（adapter 有實作、正式程式沒呼叫端）、`confirmRecord`（只有 `entryService.test.ts`、`carrierImportService.test.ts`、`RecordsView.test.ts` 在用）、`storage/index.ts` 的 `toIdbRange` 轉出（沒人從 index 匯入）、`runBlobRoundTrip`／`BlobRoundTrip`（Phase 2 真機自檢，沒有呼叫端）、`isStandardInvoiceNumber`（design.md:705 說「只供 UI 提示」，UI 沒接）、`StoragePort.query`／`KeyRange`／`toIdbRange`（只有 `buildCsvFile(range)` 有條件呼叫，UI 從不傳 range；CSV 日期區間使用者 2026-11-17 決定不做）。B7b 不動（使用者 2026-10-18 決定）。觸發點：下一次清理 port 或 storage 介面時；另外 `matchMode: 'regex'` 沒有任何產生點（UI 與內建規則全是 `contains`），卻用使用者字串建 RegExp（REVIEW-2026-11-17 A7）
 - 「null 類別 → 標籤，否則查表」有兩份實作：`useRecords.ts` 的 `categoryName` 與 `csv.ts` 的 `toCsv`（B7c 只把文案換成 `UNCATEGORIZED` 常數，沒合併）。觸發點：要改類別名稱的 fallback 時（例如刪除類別後的顯示）
 - 依匯入批次撤銷（bulk-delete 評估後不做）：紀錄沒有匯入批次識別，合併過的紀錄也回不到合併前的樣子，要改 schema 與備份格式。目前用「搜尋 → 全選目前結果 → 刪除」代替。觸發點：搜尋加全選圈不出某次匯入的範圍
 - 紀錄頁沒有依月份或來源篩選（bulk-delete 不做）：多選刪除只能靠搜尋店家、品項、類別圈範圍。觸發點：要刪某個月或所有載具紀錄時，搜尋加全選不夠用
 - 刪紀錄不倒回規則的 `hitCount`／`lastHitAt`（bulk-delete 決定不做）：刪測試資料後設定頁的「命中 N 次」會偏高；`hitCount` 只用於顯示，不影響分類排序（`matching.ts`）。要倒回得記錄每次命中來源。觸發點：使用者覺得命中次數誤導
 - 多選刪除：iOS 用中文輸入法改搜尋關鍵字後，列上的勾勾似乎沒清空（2026-10-26 真機驗收回報，當時沒注意底部「已選」列與列表是否已篩選）。jsdom 下一般輸入與模擬組字都會清空；組字中（還沒選字）關鍵字不更新，勾選維持是預期行為。下次照這個順序觀察：勾 2 筆 → 打中文並選字送出 → 看列表是否篩選、底部列是否消失、勾勾是否還在 → 再用英文試一次。底部列還在＝狀態沒清（看 `watch(keyword)`／v-model 組字）；底部列消失但勾勾在＝DOM 的 `checked` 沒同步（可改成依 `selected` 重建 checkbox）。觸發點：再次重現
 - 整頁金額千分位：多數頁面金額是 `$4560`，只有分析頁佐證清單是 `$1,300`（B6b）。month-overview 沿用不加千分位，整頁統一要一起改紀錄頁、待確認頁、編輯頁、備份頁與測試斷言。觸發點：使用者覺得大額金額難讀
+- 錯誤層反向依賴：`errors/handleError.ts` 為了拿例外型別 import `services/entryService`、`backup/backup`、`services/carrierImportService`，`EXPECTED` 清單要手動維護（`CarrierImportChoiceError`、`BuiltinRuleDeleteError` 沒列，目前被 UI 擋住）。修法：`ExpectedError` 基底類別（REVIEW-2026-11-17 B1）。觸發點：出現沒列進清單的預期例外，或要再新增一種預期例外
+- 拆 `entryService.ts`（526 行）：分類載入、文字建檔、修正學習、待確認解決、批次確認、品項對位、照片、刪除都在一檔；純搬移成 `classifyService`／`correctionService`，其餘併入既有 `recordService`。順手把 `correctCategory` 的規則與紀錄改成同一個 transaction（目前分兩個，紀錄寫入失敗時規則已學成，機率極低；REVIEW-2026-11-17 A1、B2）。觸發點：要動 `resolvePending` 或 `correctCategory` 的邏輯時（使用者 2026-11-25 改的觸發點；原「下一個碰 entryService 的批次」在 pending-bulk-confirm 時已碰到但沒做）
+- 寫入後自動重新整理：共用狀態靠每頁 `onMounted(refreshRecords)` 與每個寫入點後手動 refresh，record-edit-categories 修過一次漏呼叫（REVIEW-2026-11-17 B3）。觸發點：下一次又出現「忘了重新整理」的 bug
+- 搜尋不轉全形半形：紀錄頁搜尋只 `toLowerCase`，「ＡＢＣ」搜不到「ABC」；分類比對那邊有用 `normalizeInput`（REVIEW-2026-11-17 B8）。觸發點：使用者打全形字搜尋找不到
+- 合併時品項金額來源不一致：`mergeRecords` 品項是「項數多者勝」，手輸或 QR 的品項比載具多時，載具的單品小計會被丟掉；QR 品項金額恆 `null`、載具是小計（REVIEW-2026-11-17 A6／C9）。觸發點：分析頁重複購買的金額明顯估錯
+- 有讀取者、沒有 UI 的設定：`defaults.qty`、`confidence.pendingBelow`、`export.delimiter`、`backup.remindAfterDays`（REVIEW-2026-11-17 B6）。觸發點：想調整其中一個
+- 大頁面與重複樣式：`BackupView.vue` 646 行（匯出、載具匯入、還原）、`PendingView.vue` 641 行；底部固定列 `.with-bar`／`.bar` 在 RecordsView 與 PendingView 各一份（REVIEW-2026-11-17 B7、REVIEW-2026-11-25 C1）。觸發點：出現第三處底部列，或下次大改其中一頁
+- 設定頁一半是開發期工具（發票樣本、QR 實驗室、照片壓縮），可收進「進階」（REVIEW-2026-11-17 C7）。觸發點：使用者覺得設定頁太亂
+- 小一致性問題：`QrLabView.vue` `run()` 的 catch 直接顯示 `err.message`，沒走 `handleError`、不進錯誤紀錄；`index.html` viewport 的 `user-scalable=no` 在非 iOS 會擋放大（REVIEW-2026-11-17 QrLab、D4）。觸發點：QR 實驗室下架，或有人需要放大畫面
 
 已評估、未採用：沒有總計額時用品項加總帶入金額（見 design.md §5.3 的觸發點）；待確認卡依原因聚焦欄位（design.md §3.7，使用者 2026-10-29 回覆用起來不覺得找欄位麻煩，關掉 ticket）。
 
